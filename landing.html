@@ -103,7 +103,8 @@
 <section id="calc">
   <div class="wrap">
     <h2>Was holst du zurück?</h2>
-    <p class="lead">Schieb die Regler auf deine Zahlen. Die Rechnung ist konservativ.</p>
+    <p class="lead">Schieb die Regler auf deine Zahlen. Unverbindliches Rechenbeispiel –
+      tatsächliche Ergebnisse hängen von deinen individuellen Werten ab und können abweichen.</p>
     <div class="calc">
       <div>
         <label>Monatlicher Umsatz (MRR): <span class="val" id="mrrVal">3.000 €</span></label>
@@ -161,6 +162,8 @@
         <a class="btn ghost" href="#">Starten</a>
       </div>
     </div>
+    <p style="text-align:center;color:var(--muted);font-size:13px;margin-top:18px">
+      Alle Preise verstehen sich als Nettopreise zzgl. der gesetzlichen Umsatzsteuer. Angebot richtet sich an Unternehmer (B2B).</p>
   </div>
 </section>
 
@@ -184,8 +187,8 @@
 </section>
 
 <footer>
-  <div class="wrap">PayRescue · Wartungsarme Umsatzrettung für Stripe ·
-    <a href="#">Datenschutz</a> · <a href="#">Impressum</a></div>
+  <div class="wrap">© <span id="year"></span> Simobi UG (haftungsbeschränkt) · Wartungsarme Umsatzrettung für Stripe ·
+    <a href="/datenschutz">Datenschutz</a> · <a href="/impressum">Impressum</a></div>
 </footer>
 
 <script>
@@ -205,6 +208,7 @@
   }
   [mrr,fail,rec].forEach(el=>el.addEventListener('input',update));
   update();
+  document.getElementById('year').textContent=new Date().getFullYear();
 </script>
 </body>
 </html>

@@ -8,7 +8,7 @@ COPY package.json package-lock.json* ./
 RUN npm install --omit=dev
 
 COPY src ./src
-COPY landing.html ./landing.html
+COPY landing.html impressum.html datenschutz.html ./
 
 ENV NODE_ENV=production
 # Host setzt $PORT; unsere App liest process.env.PORT
