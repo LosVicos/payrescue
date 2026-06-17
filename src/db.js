@@ -14,9 +14,26 @@ const FILE = path.join(DATA_DIR, "payrescue.json");
 
 function load() {
   try { return JSON.parse(fs.readFileSync(FILE, "utf8")); }
-  catch { return { recoveries: {}, events: [] }; }
+  catch { return { recoveries: {}, events: [], settings: {} }; }
 }
 function save(db) { fs.writeFileSync(FILE, JSON.stringify(db, null, 2)); }
+
+// Merchant-configurable sender settings. The customer (the merchant who uses
+// PayRescue) chooses whether the dunning mail goes out under their Stripe brand
+// name or a custom name they type in. Persisted on the volume like everything else.
+const DEFAULT_SETTINGS = { nameMode: "stripe", customName: "", replyTo: "" };
+
+export function getSettings() {
+  const db = load();
+  return { ...DEFAULT_SETTINGS, ...(db.settings || {}) };
+}
+
+export function saveSettings(patch) {
+  const db = load();
+  db.settings = { ...DEFAULT_SETTINGS, ...(db.settings || {}), ...patch };
+  save(db);
+  return db.settings;
+}
 
 export function upsertFailure({ invoiceId, customerId, email, amount, currency }) {
   const db = load();
