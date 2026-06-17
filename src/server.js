@@ -145,6 +145,7 @@ function sendStatic(res, name) {
 }
 app.get("/impressum", (_, res) => sendStatic(res, "impressum.html"));
 app.get("/datenschutz", (_, res) => sendStatic(res, "datenschutz.html"));
+app.get("/agb", (_, res) => sendStatic(res, "agb.html"));
 
 // --- Tiny dashboard so the customer sees the value (= why they keep paying) ---
 app.get("/dashboard", (req, res) => {
