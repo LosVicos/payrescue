@@ -137,6 +137,15 @@ app.get("/", (req, res) => {
   res.redirect("/dashboard");
 });
 
+// --- Legal pages (Pflichtangaben nach deutschem Recht) ---
+function sendStatic(res, name) {
+  const file = path.join(__dirname, "..", name);
+  if (fs.existsSync(file)) return res.sendFile(file);
+  return res.status(404).send("Seite nicht gefunden.");
+}
+app.get("/impressum", (_, res) => sendStatic(res, "impressum.html"));
+app.get("/datenschutz", (_, res) => sendStatic(res, "datenschutz.html"));
+
 // --- Tiny dashboard so the customer sees the value (= why they keep paying) ---
 app.get("/dashboard", (req, res) => {
   const s = stats();
