@@ -1,0 +1,19 @@
+{
+  "name": "payrescue",
+  "version": "0.1.0",
+  "description": "Affordable Stripe failed-payment recovery (dunning) for solo SaaS founders. Webhook-driven, wartungsarm.",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "init-db": "node db.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "resend": "^4.0.0",
+    "stripe": "^16.12.0"
+  },
+  "license": "MIT"
+}
