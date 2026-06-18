@@ -101,7 +101,23 @@ export function getAccountByEmail(email) {
 }
 
 // Find an account by email or create a fresh one. Returns the account.
-export function getOrCreateAccount(email) {
+// --- AVV-Annahme: revisionssicheres Protokoll (Art. 28 Abs. 9 DSGVO) -------
+export function recordAvvAcceptance({ email, version, ip, userAgent }) {
+  const db = load();
+  db.avvAcceptances = db.avvAcceptances || [];
+  const rec = {
+    email: (email || "").toLowerCase(),
+    version: String(version || ""),
+    acceptedAt: new Date().toISOString(),
+    ip: ip || "",
+    userAgent: (userAgent || "").slice(0, 300),
+  };
+  db.avvAcceptances.push(rec);
+  const a = Object.values(db.accounts).find((x) => x.email === rec.email);
+  if (a) a.avv = { version: rec.version, acceptedAt: rec.acceptedAt };
+  save(db);
+  return rec;
+}export function getOrCreateAccount(email) {
   const db = load();
   const e = (email || "").toLowerCase();
   let a = Object.values(db.accounts).find((x) => x.email === e);
