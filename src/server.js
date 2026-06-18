@@ -46,56 +46,135 @@ const TRIAL_DAYS = Number(process.env.PR_TRIAL_DAYS || 5);
 
 // --- Shared dark theme, matching the public landing page ------------------
 const THEME = `
-  :root{--bg:#0b0f17;--card:#121826;--line:#222c3e;--text:#e8edf6;
-    --muted:#94a3b8;--brand:#34d399;--brand2:#10b981;--accent:#38bdf8}
+  :root{--bg:#0b0f17;--bg2:#0e1422;--card:#121826;--line:#222c3e;--text:#e8edf6;
+    --muted:#94a3b8;--brand:#34d399;--brand2:#10b981;--accent:#38bdf8;
+    --grad:linear-gradient(135deg,#34d399 0%,#38bdf8 100%);
+    --radius:16px;--shadow:0 12px 40px -12px rgba(0,0,0,.6)}
   *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
   body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
-    background:var(--bg);color:var(--text);line-height:1.55;-webkit-font-smoothing:antialiased}
+    background:radial-gradient(1100px 600px at 80% -10%,rgba(56,189,248,.10),transparent 60%),
+      radial-gradient(900px 500px at -10% 10%,rgba(52,211,153,.10),transparent 55%),var(--bg);
+    background-attachment:fixed;color:var(--text);line-height:1.55;-webkit-font-smoothing:antialiased}
   a{color:inherit}
-  .wrap{max-width:880px;margin:0 auto;padding:0 24px}
+  .wrap{max-width:900px;margin:0 auto;padding:0 24px}
   .narrow{max-width:440px}
-  nav{display:flex;justify-content:space-between;align-items:center;padding:20px 0;border-bottom:1px solid var(--line)}
+  /* sticky frosted nav */
+  nav{display:flex;justify-content:space-between;align-items:center;padding:16px 0;
+    border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20;
+    background:rgba(11,15,23,.72);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
   .logo{font-weight:800;font-size:20px;letter-spacing:-.02em;text-decoration:none}
   .logo span{color:var(--brand)}
-  .navlinks{display:flex;gap:16px;align-items:center;font-size:14px;color:var(--muted)}
-  .navlinks a{text-decoration:none}
-  .navlinks a.active{color:var(--text)}
-  .btn{display:inline-block;background:linear-gradient(180deg,var(--brand),var(--brand2));
+  .navlinks{display:flex;gap:6px;align-items:center;font-size:14px;color:var(--muted)}
+  .navlinks a{text-decoration:none;padding:7px 12px;border-radius:9px;display:inline-flex;align-items:center;gap:6px;transition:.15s}
+  .navlinks a:hover{background:var(--bg2);color:var(--text)}
+  .navlinks a.active{color:var(--text);background:var(--bg2)}
+  .navlinks .who{padding:7px 4px;color:#5f6f86;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  svg.ic{width:18px;height:18px;flex:none;stroke:currentColor;stroke-width:1.9;fill:none;
+    stroke-linecap:round;stroke-linejoin:round;vertical-align:-3px}
+  /* buttons */
+  .btn{display:inline-flex;align-items:center;gap:8px;background:var(--grad);
     color:#04231a;font-weight:700;padding:12px 22px;border-radius:12px;text-decoration:none;
-    border:none;cursor:pointer;font-size:15px;transition:transform .08s}
-  .btn:hover{transform:translateY(-1px)}
-  .btn.ghost{background:transparent;color:var(--text);border:1px solid var(--line);font-weight:600}
-  .btn.full{width:100%;text-align:center}
-  h1{font-size:30px;letter-spacing:-.02em;margin-bottom:6px}
-  h2{font-size:20px;letter-spacing:-.01em;margin-bottom:4px}
+    border:none;cursor:pointer;font-size:15px;transition:transform .12s,box-shadow .12s;
+    box-shadow:0 8px 22px -10px rgba(52,211,153,.8)}
+  .btn:hover{transform:translateY(-2px);box-shadow:0 14px 30px -10px rgba(52,211,153,.9)}
+  .btn:active{transform:translateY(0)}
+  .btn.ghost{background:transparent;color:var(--text);border:1px solid var(--line);font-weight:600;box-shadow:none}
+  .btn.ghost:hover{border-color:var(--brand);background:var(--bg2)}
+  .btn.full{width:100%;justify-content:center}
+  h1{font-size:32px;letter-spacing:-.025em;margin-bottom:6px;line-height:1.1}
+  h2{font-size:20px;letter-spacing:-.01em;margin-bottom:4px;display:flex;align-items:center;gap:9px}
+  h2 .ic{color:var(--brand)}
   .muted{color:var(--muted)}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px}
+  /* cards */
+  .card{background:linear-gradient(180deg,rgba(255,255,255,.02),transparent),var(--card);
+    border:1px solid var(--line);border-radius:var(--radius);padding:22px;
+    transition:transform .18s,border-color .18s,box-shadow .18s}
+  .card.lift:hover{transform:translateY(-3px);border-color:#2c3a52;box-shadow:var(--shadow)}
+  .stat{position:relative;overflow:hidden}
   .stat .lbl{font-size:13px;color:var(--muted)}
-  .stat .big{font-size:30px;font-weight:800;letter-spacing:-.02em;margin:2px 0}
-  input,textarea,select{width:100%;padding:12px;border:1px solid var(--line);background:#0e1422;
-    color:var(--text);border-radius:10px;font-size:15px;font-family:inherit;resize:vertical}
+  .stat .big{font-size:32px;font-weight:800;letter-spacing:-.02em;margin:2px 0}
+  .ibadge{position:absolute;top:18px;right:18px;width:40px;height:40px;border-radius:12px;
+    display:flex;align-items:center;justify-content:center;background:rgba(52,211,153,.12);color:var(--brand)}
+  .ibadge.blue{background:rgba(56,189,248,.12);color:var(--accent)}
+  .ibadge .ic{width:22px;height:22px;stroke-width:2}
+  /* hero */
+  .hero{position:relative;overflow:hidden;border:1px solid var(--line);border-radius:20px;
+    padding:30px 28px;margin-top:22px;
+    background:linear-gradient(135deg,rgba(52,211,153,.14),rgba(56,189,248,.12)),var(--card)}
+  .hero:before{content:"";position:absolute;inset:0;background:
+    radial-gradient(420px 200px at 90% -40%,rgba(56,189,248,.30),transparent 70%);pointer-events:none}
+  .hero h1{margin:0}
+  .hero .eyebrow{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700;
+    letter-spacing:.08em;text-transform:uppercase;color:var(--brand);margin-bottom:10px}
+  /* inputs */
+  input,textarea,select{width:100%;padding:12px 14px;border:1px solid var(--line);background:var(--bg2);
+    color:var(--text);border-radius:11px;font-size:15px;font-family:inherit;resize:vertical;transition:.15s}
   input::placeholder,textarea::placeholder{color:#5b6b82}
-  input:focus,textarea:focus{outline:none;border-color:var(--brand)}
+  input:focus,textarea:focus,select:focus{outline:none;border-color:var(--brand);
+    box-shadow:0 0 0 3px rgba(52,211,153,.18)}
   .flabel{display:block;font-size:14px;color:var(--muted);margin:14px 0 6px;font-weight:600}
+  /* table */
   table{width:100%;border-collapse:collapse;font-size:14px}
-  th{text-align:left;color:var(--muted);font-size:12px;font-weight:600;padding:0 10px 10px}
-  td{padding:12px 10px;border-top:1px solid var(--line)}
-  .badge{padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600}
+  th{text-align:left;color:var(--muted);font-size:12px;font-weight:600;padding:0 12px 10px;text-transform:uppercase;letter-spacing:.04em}
+  td{padding:13px 12px;border-top:1px solid var(--line)}
+  tbody tr{transition:background .12s}
+  tbody tr:hover{background:rgba(255,255,255,.025)}
+  .badge{display:inline-flex;align-items:center;gap:6px;padding:3px 11px;border-radius:999px;font-size:12px;font-weight:600}
+  .badge:before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
   .badge.ok{background:#0e2a20;color:var(--brand)}
   .badge.open{background:#2a2410;color:#fbbf24}
+  /* radio cards */
   .radio{display:flex;gap:12px;align-items:flex-start;padding:14px;border:1px solid var(--line);
-    border-radius:12px;margin-bottom:12px;cursor:pointer;background:var(--card)}
-  .radio.sel{border-color:var(--brand);box-shadow:0 0 0 1px var(--brand)}
-  details{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:4px 16px;margin-bottom:10px}
-  summary{cursor:pointer;font-weight:600;padding:10px 0}
+    border-radius:12px;margin-bottom:12px;cursor:pointer;background:var(--card);transition:.15s}
+  .radio:hover{border-color:#2c3a52}
+  .radio.sel{border-color:var(--brand);box-shadow:0 0 0 1px var(--brand),0 8px 24px -14px rgba(52,211,153,.7)}
+  details{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:4px 16px;margin-bottom:10px;transition:border-color .15s}
+  details[open]{border-color:#2c3a52}
+  summary{cursor:pointer;font-weight:600;padding:10px 0;list-style:none}
+  summary::-webkit-details-marker{display:none}
+  summary:before{content:"+";display:inline-block;width:18px;color:var(--brand);font-weight:800}
+  details[open] summary:before{content:"–"}
   .notice{padding:14px 16px;border-radius:12px;font-size:14px}
   .notice.warn{background:#1f1a0e;border:1px solid #3a320e;color:#fbbf24}
   .notice.info{background:#0e1f2a;border:1px solid #14323a;color:var(--accent)}
   .notice.ok{background:#0e2a20;border:1px solid #143a2c;color:var(--brand)}
   .notice.err{background:#2a1010;border:1px solid #3a1414;color:#f87171}
-  code{background:#0e1422;border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:13px}
-  .bar{height:8px;background:#0e1422;border-radius:999px;margin-top:10px;overflow:hidden}
+  code{background:var(--bg2);border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:13px}
+  .bar{height:9px;background:var(--bg2);border-radius:999px;margin-top:12px;overflow:hidden}
+  .bar > div{height:100%;border-radius:999px;background:var(--grad);transform-origin:left;
+    animation:growbar 1.1s cubic-bezier(.22,1,.36,1) both}
+  /* entrance animations (respect reduced motion) */
+  @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  @keyframes growbar{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+  .fade{opacity:0;animation:fadeUp .55s cubic-bezier(.22,1,.36,1) forwards}
+  .fade.d1{animation-delay:.06s}.fade.d2{animation-delay:.12s}.fade.d3{animation-delay:.18s}
+  .fade.d4{animation-delay:.24s}.fade.d5{animation-delay:.3s}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}.fade{opacity:1}}
 `;
+
+// Inline icon set (stroke = currentColor). Keeps markup tidy and dependency-free.
+function icon(name) {
+  const p = {
+    logo: '<path d="M12 3l7 3v5c0 4.4-3 7.4-7 9-4-1.6-7-4.6-7-9V6z"/><path d="M9 12l2 2 4-4"/>',
+    dashboard: '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>',
+    settings: '<line x1="4" y1="6" x2="20" y2="6"/><circle cx="9" cy="6" r="2.3"/><line x1="4" y1="12" x2="20" y2="12"/><circle cx="15" cy="12" r="2.3"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="8" cy="18" r="2.3"/>',
+    euro: '<path d="M17 5a7 7 0 100 14"/><line x1="4" y1="10" x2="13" y2="10"/><line x1="4" y1="14" x2="12" y2="14"/>',
+    clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2"/>',
+    gauge: '<path d="M4 16a8 8 0 1116 0"/><path d="M12 16l4-4"/>',
+    list: '<line x1="8" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="20" y2="12"/><line x1="8" y1="18" x2="20" y2="18"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/>',
+    mail: '<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M4 7l8 6 8-6"/>',
+    user: '<circle cx="12" cy="8" r="3.6"/><path d="M5 20c1.2-3.4 4-5 7-5s5.8 1.6 7 5"/>',
+    tag: '<path d="M3 11l8-8 9 9-8 8z"/><circle cx="8" cy="8" r="1.4"/>',
+    shield: '<path d="M12 3l7 3v5c0 4.4-3 7.4-7 9-4-1.6-7-4.6-7-9V6z"/>',
+    back: '<line x1="19" y1="12" x2="5" y2="12"/><path d="M11 6l-6 6 6 6"/>',
+    lock: '<rect x="5" y="11" width="14" height="9" rx="2.2"/><path d="M8 11V8a4 4 0 018 0v3"/>',
+    spark: '<path d="M12 3v6M12 15v6M3 12h6M15 12h6"/>',
+    card: '<rect x="3" y="5" width="18" height="14" rx="2.5"/><line x1="3" y1="10" x2="21" y2="10"/>',
+    check: '<path d="M5 13l4 4L19 7"/>',
+  }[name] || '';
+  return `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${p}</svg>`;
+}
 
 // Full HTML document with the shared theme applied.
 function page(title, body, { narrow = false } = {}) {
@@ -107,15 +186,14 @@ function page(title, body, { narrow = false } = {}) {
 
 // Top nav for the logged-in app (logo + section links + account/logout).
 function topnav(account, active = "") {
-  const link = (href, label) =>
-    `<a href="${href}" class="${active === href ? "active" : ""}">${label}</a>`;
+  const link = (href, label, ic) =>
+    `<a href="${href}" class="${active === href ? "active" : ""}">${icon(ic)}${label}</a>`;
   return `<nav>
     <a href="/dashboard" class="logo">Pay<span>Rescue</span></a>
     <div class="navlinks">
-      ${link("/dashboard", "Dashboard")}
-      ${link("/settings", "Einstellungen")}
-      <span style="color:#3a455a">·</span>
-      <span title="${esc(account.email)}">${esc(account.email)}</span>
+      ${link("/dashboard", "Dashboard", "dashboard")}
+      ${link("/settings", "Einstellungen", "settings")}
+      <span class="who" title="${esc(account.email)}">${esc(account.email)}</span>
       <a href="/logout">Abmelden</a>
     </div>
   </nav>`;
@@ -386,24 +464,25 @@ function loginPage({ sent, error } = {}) {
     ? `<div class="notice err" style="margin-bottom:16px">${esc(error)}</div>`
     : "";
   const body = `
-    <div style="padding:28px 0 40px;text-align:center">
-      <a href="/" class="logo" style="font-size:24px">Pay<span>Rescue</span></a>
+    <div class="fade" style="padding:46px 0 26px;text-align:center">
+      <a href="/" class="logo" style="font-size:26px">Pay<span>Rescue</span></a>
     </div>
-    <div class="card">
-      <h1>Anmelden</h1>
+    <div class="card lift fade d1">
+      <span class="eyebrow" style="color:var(--brand);display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px">${icon("lock")} Sicherer Login</span>
+      <h1 style="font-size:26px">Anmelden</h1>
       <p class="muted" style="margin-bottom:18px">Gib deine E-Mail ein – wir schicken dir einen Login-Link. Kein Passwort nötig.</p>
       ${msg}
-     <form method="post" action="/login" style="margin-top:16px">
-      <input name="email" type="email" required placeholder="du@deinefirma.de"
-        style="width:100%;padding:12px;border:1px solid #ddd;border-radius:10px;font-size:15px;margin-bottom:12px">
-      <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;color:#555;margin-bottom:14px">
-        <input type="checkbox" name="avv" value="1" required style="margin-top:3px">
-        <span>Ich akzeptiere den <a href="/avv" target="_blank" style="color:#2563eb;text-decoration:none">Auftragsverarbeitungsvertrag (Version 1.0)</a> und die <a href="/datenschutz" target="_blank" style="color:#2563eb;text-decoration:none">Datenschutzerklärung</a>.</span>
-      </label>
-      <button type="submit" style="background:#111;color:#fff;border:0;padding:12px 20px;border-radius:10px;font-size:15px;cursor:pointer;width:100%">Login-Link senden</button>
-    </form>
+      <form method="post" action="/login" style="margin-top:4px">
+        <label class="flabel" style="margin-top:0">E-Mail-Adresse</label>
+        <input name="email" type="email" required placeholder="du@deinefirma.de" autofocus>
+        <label class="avv" style="display:flex;gap:10px;align-items:flex-start;font-size:13px;color:var(--muted);margin:16px 0 18px;cursor:pointer">
+          <input type="checkbox" name="avv" value="1" required style="width:auto;margin-top:3px">
+          <span>Ich akzeptiere den <a href="/avv" target="_blank" style="color:var(--accent);text-decoration:none">Auftragsverarbeitungsvertrag (Version 1.0)</a> und die <a href="/datenschutz" target="_blank" style="color:var(--accent);text-decoration:none">Datenschutzerklärung</a>.</span>
+        </label>
+        <button type="submit" class="btn full">${icon("mail")} Login-Link senden</button>
+      </form>
     </div>
-    <p class="muted" style="font-size:13px;margin-top:22px;text-align:center"><a href="/">← Zur Startseite</a></p>`;
+    <p class="muted fade d2" style="font-size:13px;margin-top:22px;text-align:center"><a href="/" style="text-decoration:none">← Zur Startseite</a></p>`;
   return page("PayRescue – Anmelden", body, { narrow: true });
 }
 
@@ -470,11 +549,11 @@ app.get("/logout", (req, res) => {
 // Small standalone notice page (used when checkout isn't configured yet).
 function noticePage(title, html) {
   const body = `
-    <div style="padding:28px 0 28px;text-align:center">
+    <div class="fade" style="padding:40px 0 24px;text-align:center">
       <a href="/" class="logo" style="font-size:24px">Pay<span>Rescue</span></a>
     </div>
-    <div class="card">${html}</div>
-    <p class="muted" style="font-size:13px;margin-top:22px;text-align:center"><a href="/dashboard">← Zum Dashboard</a></p>`;
+    <div class="card lift fade d1">${html}</div>
+    <p class="muted fade d2" style="font-size:13px;margin-top:22px;text-align:center"><a href="/dashboard" style="text-decoration:none">← Zum Dashboard</a></p>`;
   return page(title, body, { narrow: true });
 }
 
@@ -580,7 +659,7 @@ app.get("/dashboard", requireAuth, (req, res) => {
   const stripeConnected = req.account.stripe?.connected;
   const limitTxt = plan.limit === Infinity ? "∞" : String(plan.limit);
   const pct = plan.limit === Infinity ? 0 : Math.min(100, Math.round((used / plan.limit) * 100));
-  const barColor = pct >= 90 ? "#dc2626" : pct >= 70 ? "#d97706" : "#16a34a";
+  const barColor = pct >= 90 ? "#f87171" : pct >= 70 ? "#fbbf24" : "var(--brand)";
   const month = new Date().toLocaleDateString("de-DE", { month: "long", year: "numeric" });
 
   const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString("de-DE",
@@ -594,42 +673,46 @@ app.get("/dashboard", requireAuth, (req, res) => {
       <td style="text-align:center">${r.attempts || 0}</td>
       <td style="text-align:center">${badge(r.status)}</td>
       <td style="color:var(--muted);white-space:nowrap">${fmtDate(r.recoveredAt || r.createdAt)}</td>
-    </tr>`).join("") || `<tr><td colspan="5" style="padding:20px 10px;color:var(--muted);text-align:center">Noch keine Vorgänge.</td></tr>`;
+    </tr>`).join("") || `<tr><td colspan="5" style="padding:24px 12px;color:var(--muted);text-align:center">Noch keine Vorgänge.</td></tr>`;
 
   const body = `${topnav(req.account, "/dashboard")}
-    <div style="padding:28px 0 0">
-      <h1>Dashboard</h1>
-      <p class="muted">Wiederhergestellte Einnahmen, automatisch.</p>
+    <div class="hero fade">
+      <span class="eyebrow">${icon("spark")} Live-Übersicht</span>
+      <h1>Willkommen zurück</h1>
+      <p class="muted" style="margin-top:6px">Wiederhergestellte Einnahmen, automatisch – ohne dass du etwas tun musst.</p>
     </div>
-    ${stripeConnected ? "" : `<div class="notice warn" style="margin-top:22px">
+    ${stripeConnected ? "" : `<div class="notice warn fade d1" style="margin-top:16px">
       <b>Stripe verbinden – kommt in Kürze</b><br>
       Dein Konto ist angelegt. Sobald die Stripe-Anbindung (1-Klick) freigeschaltet ist, beginnt PayRescue automatisch, deine fehlgeschlagenen Zahlungen zu retten. Du wirst per E-Mail benachrichtigt.
     </div>`}
-    <div style="display:flex;gap:16px;margin-top:22px;flex-wrap:wrap">
-      <div class="card stat" style="flex:1;min-width:200px">
+    <div style="display:flex;gap:16px;margin-top:16px;flex-wrap:wrap">
+      <div class="card stat lift fade d1" style="flex:1;min-width:220px">
+        <div class="ibadge">${icon("euro")}</div>
         <div class="lbl">Gerettet</div>
         <div class="big" style="color:var(--brand)">${money(s.recovered_cents, cur)}</div>
         <div class="lbl">${s.recovered_count} Zahlungen</div>
       </div>
-      <div class="card stat" style="flex:1;min-width:200px">
+      <div class="card stat lift fade d2" style="flex:1;min-width:220px">
+        <div class="ibadge blue">${icon("clock")}</div>
         <div class="lbl">Offen</div>
         <div class="big">${money(s.open_cents, cur)}</div>
         <div class="lbl">${s.open_count} in Bearbeitung</div>
       </div>
     </div>
 
-    <div class="card" style="margin-top:16px">
+    <div class="card fade d3" style="margin-top:16px">
       <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--muted)">
-        <span>Rettungen im ${esc(month)} · Plan <b style="color:var(--text)">${esc(plan.name)}</b></span>
+        <span style="display:inline-flex;align-items:center;gap:7px">${icon("gauge")} Rettungen im ${esc(month)} · Plan <b style="color:var(--text)">${esc(plan.name)}</b></span>
         <span>${used} / ${limitTxt}</span>
       </div>
-      <div class="bar"><div style="height:100%;width:${pct}%;background:${barColor}"></div></div>
+      <div class="bar"><div style="width:${pct}%;background:${barColor}"></div></div>
       ${plan.limit !== Infinity && used >= plan.limit
         ? `<p style="color:#f87171;font-size:13px;margin:10px 0 0">Monatslimit erreicht – neue Zahlungen werden erst nach einem <a href="/settings" style="color:#f87171">Upgrade</a> wieder angemahnt.</p>`
         : ``}
     </div>
 
-    <h2 style="margin:34px 0 10px">Vorgänge</h2>
+    <h2 style="margin:34px 0 10px">${icon("list")} Vorgänge</h2>
+    <div class="card fade d4" style="padding:8px 8px 4px">
     <table>
       <thead><tr>
         <th>Kunde</th>
@@ -640,6 +723,7 @@ app.get("/dashboard", requireAuth, (req, res) => {
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
+    </div>
     <div style="height:50px"></div>`;
   res.send(page("PayRescue – Dashboard", body));
 });
@@ -674,7 +758,7 @@ app.get("/settings", requireAuth, async (req, res) => {
     if (isCurrent) return `<a class="btn ghost" style="opacity:.5;pointer-events:none">Aktueller Plan: ${esc(p.name)}</a>`;
     return `<a class="${cls}" href="/billing/checkout?plan=${p.key}">${esc(p.name)} buchen · ${p.price} €</a>`;
   }).join(" ");
-  const billingCard = `<div class="card" style="margin-bottom:26px">
+  const billingCard = `<div class="card lift" style="margin-bottom:26px">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
         <div style="font-size:15px"><b>Aktuelles Abo:</b> ${esc(plan.name)}
           <span class="badge ${statusOk ? "ok" : "open"}" style="margin-left:6px">${esc(statusLabel)}</span></div>
@@ -720,20 +804,23 @@ app.get("/settings", requireAuth, async (req, res) => {
     </details>`).join("");
 
   const body = `${topnav(req.account, "/settings")}
-    <div style="max-width:580px;padding:28px 0 60px">
-    <h1>Einstellungen</h1>
-    <p class="muted">Abo, Absender-Identität und deine Mahn-Texte.</p>
+    <div style="max-width:600px;padding:8px 0 60px">
+    <div class="hero fade" style="padding:26px 26px">
+      <span class="eyebrow">${icon("settings")} Konfiguration</span>
+      <h1 style="font-size:28px">Einstellungen</h1>
+      <p class="muted" style="margin-top:6px">Abo, Absender-Identität und deine Mahn-Texte.</p>
+    </div>
 
-    <h2 style="margin:24px 0 12px">Abo &amp; Zahlung</h2>
+    <h2 style="margin:26px 0 12px">${icon("card")} Abo &amp; Zahlung</h2>
     ${billingCard}
 
     <form method="post" action="/settings" style="margin-top:8px">
       ${tokenField}
-      <h2 style="margin-top:8px">Plan (manuell)</h2>
+      <h2 style="margin-top:8px">${icon("tag")} Plan (manuell)</h2>
       <p class="muted" style="margin-bottom:14px">Wird normalerweise durch dein Abo gesetzt. Manuelle Auswahl wirkt sofort – v.a. zum Testen.</p>
       ${planCards}
 
-      <h2 style="margin:32px 0 4px">Absender deiner Zahlungs-E-Mails</h2>
+      <h2 style="margin:32px 0 4px">${icon("user")} Absender deiner Zahlungs-E-Mails</h2>
       <p class="muted" style="margin-bottom:14px">So erscheint der Absender deiner Mahn-E-Mails bei deinen Kunden.</p>
       <label class="radio ${s.nameMode === "stripe" ? "sel" : ""}">
         <input type="radio" name="nameMode" value="stripe" ${sel("stripe")} style="width:auto;margin-top:4px">
@@ -755,12 +842,12 @@ app.get("/settings", requireAuth, async (req, res) => {
       <input name="notifyEmail" type="email" value="${esc(s.notifyEmail)}" placeholder="${esc(m.supportEmail || "du@deinefirma.de")}">
       <p class="muted" style="font-size:13px;margin:6px 0 0">Du bekommst eine kurze E-Mail bei jeder fehlgeschlagenen und jeder geretteten Zahlung. Leer lassen zum Abschalten. (Slack bleibt unabhängig davon aktiv, falls eingerichtet.)</p>
 
-      <h2 style="margin:32px 0 4px">Eigene Mail-Texte</h2>
-      <p class="muted" style="margin-bottom:14px">Passe die drei Mahnstufen an deine Tonalität an. Platzhalter: <code>{firma}</code>, <code>{betrag}</code>. Leere Felder nutzen automatisch den Standardtext.</p>
+      <h2 style="margin:32px 0 4px">${icon("mail")} Eigene Mail-Texte</h2>
+      <p class="muted" style="margin-bottom:14px">Passe die drei Mahnstufen an deine Tonalität an. Platzhalter: <code>{firma}</code>, <code>{betrag}</code>. Leere Felder nutzen automatisch den Standardtext. <b>Bitte keine Werbung einfügen</b> – Mahn-Mails müssen rein transaktional bleiben.</p>
       ${customAllowed ? "" : `<div class="notice warn" style="margin-bottom:14px">Eigene Mail-Texte sind ab dem <b>Growth</b>-Plan verfügbar. Wähle oben Growth oder Scale, um sie zu bearbeiten.</div>`}
       ${tplBlocks}
 
-      <button type="submit" class="btn" style="margin-top:20px">Speichern</button>
+      <button type="submit" class="btn" style="margin-top:20px">${icon("check")} Speichern</button>
     </form>
     </div>`;
   res.send(page("PayRescue – Einstellungen", body));
@@ -826,30 +913,28 @@ app.get("/api/v1/metrics", (req, res) => {
 });
 // --- AVV als lesbare Seite (für die Annahme bei der Anmeldung) -------------
 app.get("/avv", (_, res) => {
-  res.type("html").send(`<!doctype html><meta charset="utf-8">
-  <title>PayRescue – Auftragsverarbeitungsvertrag</title>
-  <body style="font-family:system-ui;max-width:760px;margin:48px auto;color:#111;line-height:1.6;padding:0 18px">
-    <p style="margin:0 0 18px"><a href="/login" style="color:#2563eb;text-decoration:none">← Zurück</a></p>
-    <h1>Auftragsverarbeitungsvertrag (AVV)</h1>
-    <p style="color:#555">Version 1.0 · gemäß Art. 28 DSGVO. Mit dem Setzen des Häkchens bei der Anmeldung schließt du als Verantwortlicher diesen AVV mit dem Betreiber von PayRescue als Auftragsverarbeiter in elektronischer Form (Art. 28 Abs. 9 DSGVO).</p>
-    <h2>1. Gegenstand &amp; Zweck</h2>
-    <p>PayRescue verarbeitet personenbezogene Daten ausschließlich in deinem Auftrag zur Wiederherstellung fehlgeschlagener Abo-Zahlungen: Erkennung fehlgeschlagener Zahlungen, Versand von Zahlungserinnerungen und Auswertung zurückgewonnener Umsätze.</p>
-    <h2>2. Datenarten &amp; Betroffene</h2>
-    <p>Betroffen sind deine Endkunden mit fehlgeschlagener Zahlung. Verarbeitet werden: E-Mail-Adresse, Rechnungs-/Zahlungs-IDs, offene Beträge, Währung, Zahlungsstatus, Anzahl Versuche, Zeitstempel. Keine besonderen Kategorien nach Art. 9 DSGVO.</p>
-    <h2>3. Weisungsbindung</h2>
-    <p>Die Verarbeitung erfolgt nur auf deine dokumentierte Weisung; deine Konfiguration des Dienstes gilt als Weisung.</p>
-    <h2>4. Technische &amp; organisatorische Maßnahmen (Art. 32 DSGVO)</h2>
-    <p>Verschlüsselte Übertragung (TLS), Mandantentrennung auf Anwendungsebene, passwortlose Authentifizierung, tokengeschützter API-Zugriff, Verarbeitung in zertifizierten Rechenzentren (SOC 2), regelmäßige Backups.</p>
-    <h2>5. Sub-Auftragsverarbeiter</h2>
-    <p>Stripe Payments Europe, Ltd. (Irland) – Zahlungsabwicklung; Resend (USA, SCC) – E-Mail-Versand; Railway (USA, SCC) – Hosting. Du stimmst diesen zu. Änderungen werden vorab mitgeteilt; Widerspruch binnen 30 Tagen möglich.</p>
-    <h2>6. Drittland</h2>
-    <p>Übermittlungen in die USA erfolgen auf Basis der EU-Standardvertragsklauseln bzw. des EU-US Data Privacy Framework.</p>
-    <h2>7. Betroffenenrechte &amp; Meldungen</h2>
-    <p>Der Auftragnehmer unterstützt dich bei Betroffenenanfragen und meldet Datenschutzverletzungen unverzüglich (i. d. R. binnen 48 h).</p>
-    <h2>8. Löschung</h2>
-    <p>Nach Vertragsende werden die Daten gelöscht oder zurückgegeben, soweit keine gesetzliche Aufbewahrungspflicht besteht.</p>
-    <p style="color:#888;font-size:13px;margin-top:28px">Stand: Version 1.0. Vollständige Fassung inkl. Anlagen auf Anfrage als Dokument.</p>
-  </body>`);
+  const sec = (n, title, html) => `<div class="card" style="margin-bottom:12px">
+      <h2 style="font-size:16px;margin-bottom:6px"><span style="display:inline-flex;width:24px;height:24px;border-radius:7px;align-items:center;justify-content:center;background:rgba(52,211,153,.14);color:var(--brand);font-size:13px;font-weight:800">${n}</span>${title}</h2>
+      <p class="muted" style="font-size:14px">${html}</p></div>`;
+  const body = `
+    <div class="fade" style="padding:30px 0 18px"><a href="/login" class="muted" style="text-decoration:none;display:inline-flex;align-items:center;gap:7px">${icon("back")} Zurück</a></div>
+    <div class="hero fade d1" style="margin-top:0">
+      <span class="eyebrow">${icon("shield")} Datenschutz</span>
+      <h1 style="font-size:26px">Auftragsverarbeitungsvertrag (AVV)</h1>
+      <p class="muted" style="margin-top:6px">Version 1.0 · gemäß Art. 28 DSGVO. Mit dem Häkchen bei der Anmeldung schließt du als Verantwortlicher diesen AVV mit dem Betreiber von PayRescue als Auftragsverarbeiter in elektronischer Form (Art. 28 Abs. 9 DSGVO).</p>
+    </div>
+    <div class="fade d2" style="margin-top:16px">
+    ${sec(1, "Gegenstand &amp; Zweck", "PayRescue verarbeitet personenbezogene Daten ausschließlich in deinem Auftrag zur Wiederherstellung fehlgeschlagener Abo-Zahlungen: Erkennung fehlgeschlagener Zahlungen, Versand von Zahlungserinnerungen und Auswertung zurückgewonnener Umsätze.")}
+    ${sec(2, "Datenarten &amp; Betroffene", "Betroffen sind deine Endkunden mit fehlgeschlagener Zahlung. Verarbeitet werden: E-Mail-Adresse, Rechnungs-/Zahlungs-IDs, offene Beträge, Währung, Zahlungsstatus, Anzahl Versuche, Zeitstempel. Keine besonderen Kategorien nach Art. 9 DSGVO.")}
+    ${sec(3, "Weisungsbindung", "Die Verarbeitung erfolgt nur auf deine dokumentierte Weisung; deine Konfiguration des Dienstes gilt als Weisung.")}
+    ${sec(4, "Technische &amp; organisatorische Maßnahmen (Art. 32 DSGVO)", "Verschlüsselte Übertragung (TLS), Mandantentrennung auf Anwendungsebene, passwortlose Authentifizierung, tokengeschützter API-Zugriff, Verarbeitung in zertifizierten Rechenzentren (SOC 2), regelmäßige Backups.")}
+    ${sec(5, "Sub-Auftragsverarbeiter", "Stripe Payments Europe, Ltd. (Irland) – Zahlungsabwicklung; Resend (USA, SCC) – E-Mail-Versand; Railway (USA, SCC) – Hosting. Du stimmst diesen zu. Änderungen werden vorab mitgeteilt; Widerspruch binnen 30 Tagen möglich.")}
+    ${sec(6, "Drittland", "Übermittlungen in die USA erfolgen auf Basis der EU-Standardvertragsklauseln bzw. des EU-US Data Privacy Framework.")}
+    ${sec(7, "Betroffenenrechte &amp; Meldungen", "Der Auftragnehmer unterstützt dich bei Betroffenenanfragen und meldet Datenschutzverletzungen unverzüglich (i. d. R. binnen 48 h).")}
+    ${sec(8, "Löschung", "Nach Vertragsende werden die Daten gelöscht oder zurückgegeben, soweit keine gesetzliche Aufbewahrungspflicht besteht.")}
+    <p class="muted" style="font-size:13px;margin:14px 2px 40px">Stand: Version 1.0. Vollständige Fassung inkl. Anlagen auf Anfrage als Dokument.</p>
+    </div>`;
+  res.send(page("PayRescue – Auftragsverarbeitungsvertrag", body));
 });
 
 app.get("/health", (_, res) => res.json({ ok: true }));
