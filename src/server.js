@@ -774,7 +774,40 @@ app.post("/settings", requireAuth, express.urlencoded({ extended: true }), (req,
   res.redirect("/settings");
 });
 
-app.get("/health", (_, res) => res.json({ ok: true }));
+// --- Machine-readable metrics API for an external finance dashboard -------
+app.get("/api/v1/metrics", (req, res) => {
+  const token = process.env.PR_API_TOKEN;
+  if (!token) return res.status(503).json({ error: "api_not_configured" });
+  const auth = req.headers.authorization || "";
+  const given = auth.startsWith("Bearer ") ? auth.slice(7).trim() : (req.query.token || "");
+  if (given !== token) return res.status(401).json({ error: "unauthorized" });
+
+  const s = stats(ownerId);
+  const records = listRecoveries(ownerId, 1000).map((r) => ({
+    date: (r.recoveredAt || r.createdAt || "").slice(0, 10),
+    type: "income",
+    amount_cents: r.amountDue || 0,
+    currency: (r.currency || "eur").toUpperCase(),
+    source: "payrescue",
+    category: "recovered_revenue",
+    status: r.status,
+    description: `Rettung – ${r.customerEmail || "unbekannt"}`,
+    external_id: r.invoiceId,
+  }));
+  res.json({
+    source: "payrescue",
+    version: 1,
+    generated_at: new Date().toISOString(),
+    currency: "EUR",
+    summary: {
+      recovered_cents: s.recovered_cents,
+      recovered_count: s.recovered_count,
+      open_cents: s.open_cents,
+      open_count: s.open_count,
+    },
+    records,
+  });
+});app.get("/health", (_, res) => res.json({ ok: true }));
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`PayRescue läuft auf :${port}`));
