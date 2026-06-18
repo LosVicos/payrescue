@@ -21,11 +21,56 @@ function save(db) { fs.writeFileSync(FILE, JSON.stringify(db, null, 2)); }
 // Merchant-configurable sender settings. The customer (the merchant who uses
 // PayRescue) chooses whether the dunning mail goes out under their Stripe brand
 // name or a custom name they type in. Persisted on the volume like everything else.
-const DEFAULT_SETTINGS = { nameMode: "stripe", customName: "", replyTo: "" };
+// `plan` gates the monthly rescue volume (see PLANS). `templates` lets Growth+
+// merchants override the built-in dunning texts (empty = use defaults).
+const DEFAULT_SETTINGS = {
+  nameMode: "stripe", customName: "", replyTo: "", notifyEmail: "",
+  plan: "starter", templates: [],
+};
+
+// The three published plans. `limit` = max rescues (= at-risk invoices entered
+// into dunning) per calendar month. Scale is effectively unlimited.
+export const PLANS = {
+  starter: { key: "starter", name: "Starter", price: 29, limit: 50 },
+  growth: { key: "growth", name: "Growth", price: 49, limit: 250 },
+  scale: { key: "scale", name: "Scale", price: 99, limit: Infinity },
+};
 
 export function getSettings() {
   const db = load();
   return { ...DEFAULT_SETTINGS, ...(db.settings || {}) };
+}
+
+export function getPlan() {
+  return PLANS[getSettings().plan] || PLANS.starter;
+}
+
+function currentMonth() {
+  return new Date().toISOString().slice(0, 7); // YYYY-MM
+}
+
+// A "rescue" is one at-risk invoice we sent at least one dunning mail for this
+// month. Counting distinct invoiceIds means retries on the same invoice don't
+// burn extra quota. Derived from the event log — no extra storage needed.
+export function usageThisMonth(month = currentMonth()) {
+  const db = load();
+  const ids = new Set();
+  for (const e of db.events || []) {
+    if (e.type === "email_sent" && (e.createdAt || "").slice(0, 7) === month) {
+      ids.add(e.invoiceId);
+    }
+  }
+  return ids.size;
+}
+
+// True if this invoice already counts toward this month's quota (so a Stripe
+// retry on it must still be allowed through even when we're at the limit).
+export function invoiceDunnedThisMonth(invoiceId, month = currentMonth()) {
+  const db = load();
+  return (db.events || []).some(
+    (e) => e.type === "email_sent" && e.invoiceId === invoiceId
+      && (e.createdAt || "").slice(0, 7) === month
+  );
 }
 
 export function saveSettings(patch) {
@@ -79,4 +124,12 @@ export function stats() {
     open_count: open.length, open_cents: sum(open),
     recovered_count: recovered.length, recovered_cents: sum(recovered),
   };
+}
+
+// Recent recoveries for the dashboard detail list, newest activity first.
+export function listRecoveries(limit = 50) {
+  const db = load();
+  return Object.values(db.recoveries)
+    .sort((a, b) => (b.recoveredAt || b.createdAt || "").localeCompare(a.recoveredAt || a.createdAt || ""))
+    .slice(0, limit);
 }

@@ -69,6 +69,45 @@ Dein Team von ${b.business}`,
   },
 ];
 
+export const STEP_COUNT = SEQUENCE.length;
+
+// The built-in texts as editable strings, with {firma}/{betrag} placeholders.
+// Used to pre-fill the /settings editor so merchants start from the real copy.
+export function templateDefaults() {
+  const zero = money(0, "eur");
+  const ctx = { business: "{firma}", amount: 0, currency: "eur" };
+  const ph = (s) => String(s).split(zero).join("{betrag}");
+  return SEQUENCE.map((step) => ({
+    subject: ph(step.subject(ctx)),
+    cta: step.cta,
+    intro: ph(step.intro(ctx)),
+    outro: ph(step.outro(ctx)),
+  }));
+}
+
+// Merchants on Growth+ may override any step's text on /settings. Placeholders
+// {firma} and {betrag} are filled in here so they don't have to hardcode values.
+function fill(s, ctx) {
+  return String(s || "")
+    .replace(/\{firma\}/g, ctx.business)
+    .replace(/\{betrag\}/g, money(ctx.amount, ctx.currency))
+    .replace(/\{business\}/g, ctx.business)
+    .replace(/\{amount\}/g, money(ctx.amount, ctx.currency));
+}
+
+// Merge a built-in step with an optional per-step override. Empty override
+// fields fall back to the default, so a merchant can tweak just the subject.
+function resolveStep(step, override, ctx) {
+  const o = override || {};
+  const has = (v) => typeof v === "string" && v.trim() !== "";
+  return {
+    subject: has(o.subject) ? fill(o.subject, ctx) : step.subject(ctx),
+    cta: has(o.cta) ? fill(o.cta, ctx) : step.cta,
+    intro: has(o.intro) ? fill(o.intro, ctx) : step.intro(ctx),
+    outro: has(o.outro) ? fill(o.outro, ctx) : step.outro(ctx),
+  };
+}
+
 // Turn a multi-paragraph text block (separated by blank lines) into HTML <p>s.
 function paras(text) {
   return text
@@ -89,18 +128,19 @@ function renderHtml({ intro, cta, outro, recoverUrl }) {
     </div></body></html>`;
 }
 
-export async function sendDunning({ to, attempt, amount, currency, recoverUrl, businessName, replyTo }) {
-  const step = SEQUENCE[Math.min(attempt - 1, SEQUENCE.length - 1)];
+export async function sendDunning({ to, attempt, amount, currency, recoverUrl, businessName, replyTo, templates }) {
+  const idx = Math.min(attempt - 1, SEQUENCE.length - 1);
+  const step = SEQUENCE[idx];
   // Merchant name drives the whole tone. Fall back sensibly so we never send
   // an anonymous "Billing" mail if Stripe didn't return a name.
   const business = businessName || process.env.BUSINESS_NAME || process.env.FROM_NAME || "Kundenservice";
   const ctx = { amount, currency, recoverUrl, business };
-  const subject = step.subject(ctx);
-  const intro = step.intro(ctx);
-  const outro = step.outro(ctx);
+  // Apply the merchant's custom override for this step, if any (Growth+).
+  const override = Array.isArray(templates) ? templates[idx] : null;
+  const { subject, cta, intro, outro } = resolveStep(step, override, ctx);
   // Plain-text fallback: the URL is shown inline (clients without HTML need it).
   const text = `${intro}\n\n${recoverUrl}\n\n${outro}`;
-  const html = renderHtml({ intro, cta: step.cta, outro, recoverUrl });
+  const html = renderHtml({ intro, cta, outro, recoverUrl });
 
   if (!resend) {
     console.log(`[email:DRY-RUN] -> ${to} | ${subject}\n${text}\n`);
@@ -118,6 +158,51 @@ export async function sendDunning({ to, attempt, amount, currency, recoverUrl, b
   if (rt) payload.replyTo = rt;
 
   await resend.emails.send(payload);
+  return { dryRun: false, subject };
+}
+
+// --- Notification to the MERCHANT (not the end customer) ---
+// A plain, internal heads-up so the merchant sees activity without needing Slack.
+// Two kinds: "failed" (a payment dropped, dunning mail went out) and
+// "recovered" (the money came back). Sent only if a notifyEmail is configured.
+export async function notifyMerchant({ to, kind, amount, currency, customerEmail, attempt, plan, limit }) {
+  if (!to) return { skipped: true };
+
+  const amt = money(amount, currency);
+  const cust = customerEmail || "unbekannt";
+  let subject, line;
+  if (kind === "recovered") {
+    subject = `✅ Zahlung gerettet – ${amt}`;
+    line = `Gute Nachricht: Die offene Zahlung über ${amt} von ${cust} wurde erfolgreich zurückgeholt.`;
+  } else if (kind === "limit") {
+    subject = `⚠️ Monatslimit erreicht (${plan})`;
+    line = `Dein Plan ${plan} erlaubt ${limit} Rettungen pro Monat – dieses Limit ist erreicht. `
+      + `Die neue fehlgeschlagene Zahlung über ${amt} von ${cust} wurde NICHT angemahnt. `
+      + `Mit einem Upgrade unter /settings werden weitere Zahlungen wieder automatisch gerettet.`;
+  } else {
+    subject = `💸 Zahlung fehlgeschlagen – ${amt}`;
+    line = `Eine Zahlung über ${amt} von ${cust} ist fehlgeschlagen. PayRescue hat automatisch eine Zahlungserinnerung (Mahnstufe ${attempt || 1}) verschickt.`;
+  }
+
+  const text = `${line}\n\nDiese Nachricht kommt automatisch von PayRescue. Du kannst die Benachrichtigungen unter /settings anpassen.`;
+  const html = `<!doctype html><html><body style="margin:0;padding:0;background:#f5f5f5">
+    <div style="max-width:520px;margin:0 auto;padding:32px 24px;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#111">
+      <p style="margin:0 0 16px">${esc(line)}</p>
+      <p style="margin:0;font-size:12px;color:#999">Automatische Nachricht von PayRescue. Benachrichtigungen änderst du unter <b>/settings</b>.</p>
+    </div></body></html>`;
+
+  if (!resend) {
+    console.log(`[notify:DRY-RUN] -> ${to} | ${subject}\n${text}\n`);
+    return { dryRun: true, subject };
+  }
+
+  await resend.emails.send({
+    from: `PayRescue <${process.env.FROM_EMAIL}>`,
+    to,
+    subject,
+    html,
+    text,
+  });
   return { dryRun: false, subject };
 }
 
