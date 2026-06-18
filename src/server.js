@@ -393,10 +393,15 @@ function loginPage({ sent, error } = {}) {
       <h1>Anmelden</h1>
       <p class="muted" style="margin-bottom:18px">Gib deine E-Mail ein – wir schicken dir einen Login-Link. Kein Passwort nötig.</p>
       ${msg}
-      <form method="post" action="/login">
-        <input name="email" type="email" required placeholder="du@deinefirma.de" style="margin-bottom:14px">
-        <button type="submit" class="btn full">Login-Link senden</button>
-      </form>
+     <form method="post" action="/login" style="margin-top:16px">
+      <input name="email" type="email" required placeholder="du@deinefirma.de"
+        style="width:100%;padding:12px;border:1px solid #ddd;border-radius:10px;font-size:15px;margin-bottom:12px">
+      <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;color:#555;margin-bottom:14px">
+        <input type="checkbox" name="avv" value="1" required style="margin-top:3px">
+        <span>Ich akzeptiere den <a href="/avv" target="_blank" style="color:#2563eb;text-decoration:none">Auftragsverarbeitungsvertrag (Version 1.0)</a> und die <a href="/datenschutz" target="_blank" style="color:#2563eb;text-decoration:none">Datenschutzerklärung</a>.</span>
+      </label>
+      <button type="submit" style="background:#111;color:#fff;border:0;padding:12px 20px;border-radius:10px;font-size:15px;cursor:pointer;width:100%">Login-Link senden</button>
+    </form>
     </div>
     <p class="muted" style="font-size:13px;margin-top:22px;text-align:center"><a href="/">← Zur Startseite</a></p>`;
   return page("PayRescue – Anmelden", body, { narrow: true });
