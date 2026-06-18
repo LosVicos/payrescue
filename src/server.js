@@ -14,8 +14,10 @@ import { fileURLToPath } from "url";
 import {
   upsertFailure, markRecovered, logEvent, stats, getSettings, saveSettings,
   getPlan, usageThisMonth, invoiceDunnedThisMonth, listRecoveries, PLANS,
+  ownerId, getOrCreateAccount, createLoginToken, consumeLoginToken,
+  createSession, getSessionAccount, destroySession,
 } from "./db.js";
-import { sendDunning, notifyMerchant, money, templateDefaults, STEP_COUNT } from "./email.js";
+import { sendDunning, notifyMerchant, money, templateDefaults, STEP_COUNT, sendLoginLink } from "./email.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -85,18 +87,18 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
   try {
     if (event.type === "invoice.payment_failed") {
       const inv = event.data.object;
-      const rec = upsertFailure({
+      const rec = upsertFailure(ownerId, {
         invoiceId: inv.id,
         customerId: inv.customer,
         email: inv.customer_email,
         amount: inv.amount_due,
         currency: inv.currency,
       });
-      logEvent(inv.id, "failed", `attempt ${rec.attempts}`);
+      logEvent(ownerId, inv.id, "failed", `attempt ${rec.attempts}`);
 
       const url = await recoveryUrl(inv.customer);
       const merchant = await merchantInfo();
-      const settings = getSettings();
+      const settings = getSettings(ownerId);
       // The merchant chooses the sender identity on /settings:
       //   "stripe" -> live brand name from Stripe (per-invoice, supports Connect)
       //   "custom" -> the name they typed in themselves
@@ -108,11 +110,11 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
       // Plan enforcement: a "rescue" = one at-risk invoice we dun this month.
       // Retries on an already-counted invoice always pass; brand-new invoices
       // are blocked once the monthly quota is hit, with a one-time heads-up.
-      const plan = getPlan();
-      const counted = invoiceDunnedThisMonth(inv.id);
-      const used = usageThisMonth();
+      const plan = getPlan(ownerId);
+      const counted = invoiceDunnedThisMonth(ownerId, inv.id);
+      const used = usageThisMonth(ownerId);
       if (!counted && used >= plan.limit) {
-        logEvent(inv.id, "limit_reached", `${plan.name}: ${used}/${plan.limit}`);
+        logEvent(ownerId, inv.id, "limit_reached", `${plan.name}: ${used}/${plan.limit}`);
         await slack(`:no_entry: Monatslimit erreicht (${plan.name}: ${plan.limit} Rettungen). `
           + `Neue fehlgeschlagene Zahlung ${money(inv.amount_due, inv.currency)} (${inv.customer_email}) NICHT angemahnt. Upgrade nötig.`);
         await notifyMerchant({
@@ -135,7 +137,7 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
         replyTo: settings.replyTo || merchant.supportEmail,
         templates,
       });
-      logEvent(inv.id, "email_sent", sent.subject);
+      logEvent(ownerId, inv.id, "email_sent", sent.subject);
 
       await slack(`:money_with_wings: Zahlung fehlgeschlagen – ${money(inv.amount_due, inv.currency)} `
         + `(${inv.customer_email}). Dunning-Mail #${rec.attempts} raus.`);
@@ -152,10 +154,10 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
 
     if (event.type === "invoice.payment_succeeded" || event.type === "invoice.paid") {
       const inv = event.data.object;
-      markRecovered(inv.id);
-      logEvent(inv.id, "recovered", money(inv.amount_due, inv.currency));
+      markRecovered(ownerId, inv.id);
+      logEvent(ownerId, inv.id, "recovered", money(inv.amount_due, inv.currency));
       await slack(`:white_check_mark: Zahlung gerettet – ${money(inv.amount_due, inv.currency)} (${inv.customer_email}).`);
-      const settings = getSettings();
+      const settings = getSettings(ownerId);
       await notifyMerchant({
         to: settings.notifyEmail,
         kind: "recovered",
@@ -170,6 +172,103 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
   }
 
   res.json({ received: true });
+});
+
+// --- Auth: magic-link login + server-side sessions (httpOnly cookie) -------
+const COOKIE = "pr_session";
+
+function parseCookies(req) {
+  const out = {};
+  const raw = req.headers.cookie || "";
+  for (const part of raw.split(";")) {
+    const i = part.indexOf("=");
+    if (i < 0) continue;
+    out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+  }
+  return out;
+}
+
+function setSessionCookie(res, token) {
+  const secure = (process.env.APP_BASE_URL || "").startsWith("https") ? "; Secure" : "";
+  res.setHeader("Set-Cookie",
+    `${COOKIE}=${encodeURIComponent(token)}; HttpOnly; Path=/; Max-Age=${30 * 86400}; SameSite=Lax${secure}`);
+}
+function clearSessionCookie(res) {
+  res.setHeader("Set-Cookie", `${COOKIE}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax`);
+}
+
+// Resolve the logged-in account from the session cookie, or null.
+function currentAccount(req) {
+  const token = parseCookies(req)[COOKIE];
+  return getSessionAccount(token);
+}
+
+// Gate a route behind login. Redirects to /login if no valid session.
+function requireAuth(req, res, next) {
+  const acct = currentAccount(req);
+  if (!acct) return res.redirect("/login");
+  req.account = acct;
+  next();
+}
+
+function loginPage({ sent, error } = {}) {
+  const msg = sent
+    ? `<p style="background:#dcfce7;border:1px solid #86efac;color:#166534;padding:12px 14px;border-radius:10px">Link verschickt! Schau in dein Postfach (${esc(sent)}). Der Link ist 20 Minuten gültig.</p>`
+    : error
+    ? `<p style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:12px 14px;border-radius:10px">${esc(error)}</p>`
+    : "";
+  return `<!doctype html><meta charset="utf-8">
+  <title>PayRescue – Anmelden</title>
+  <body style="font-family:system-ui;max-width:420px;margin:80px auto;color:#111;line-height:1.5;padding:0 16px">
+    <h1 style="margin-bottom:4px">Anmelden</h1>
+    <p style="color:#555;margin-top:0">Gib deine E-Mail ein – wir schicken dir einen Login-Link. Kein Passwort nötig.</p>
+    ${msg}
+    <form method="post" action="/login" style="margin-top:16px">
+      <input name="email" type="email" required placeholder="du@deinefirma.de"
+        style="width:100%;padding:12px;border:1px solid #ddd;border-radius:10px;font-size:15px;margin-bottom:12px">
+      <button type="submit" style="background:#111;color:#fff;border:0;padding:12px 20px;border-radius:10px;font-size:15px;cursor:pointer;width:100%">Login-Link senden</button>
+    </form>
+    <p style="color:#888;font-size:13px;margin-top:24px"><a href="/" style="color:#2563eb;text-decoration:none">← Zur Startseite</a></p>
+  </body>`;
+}
+
+app.get("/login", (req, res) => {
+  if (currentAccount(req)) return res.redirect("/dashboard");
+  res.send(loginPage());
+});
+
+app.post("/login", express.urlencoded({ extended: true }), async (req, res) => {
+  const email = (req.body.email || "").trim().toLowerCase();
+  if (!email || !email.includes("@")) {
+    return res.status(400).send(loginPage({ error: "Bitte eine gültige E-Mail-Adresse eingeben." }));
+  }
+  const token = createLoginToken(email);
+  const base = process.env.APP_BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
+  const url = `${base}/login/verify?token=${encodeURIComponent(token)}`;
+  try {
+    await sendLoginLink({ to: email, url });
+  } catch (e) {
+    console.error("login mail error:", e.message);
+  }
+  res.send(loginPage({ sent: email }));
+});
+
+app.get("/login/verify", (req, res) => {
+  const email = consumeLoginToken(req.query.token);
+  if (!email) {
+    return res.status(400).send(loginPage({ error: "Dieser Link ist ungültig oder abgelaufen. Bitte fordere einen neuen an." }));
+  }
+  const acct = getOrCreateAccount(email);
+  const session = createSession(acct.id);
+  setSessionCookie(res, session);
+  res.redirect("/dashboard");
+});
+
+app.get("/logout", (req, res) => {
+  const token = parseCookies(req)[COOKIE];
+  destroySession(token);
+  clearSessionCookie(res);
+  res.redirect("/login");
 });
 
 // --- Public landing page at the domain root ---
@@ -190,11 +289,13 @@ app.get("/datenschutz", (_, res) => sendStatic(res, "datenschutz.html"));
 app.get("/agb", (_, res) => sendStatic(res, "agb.html"));
 
 // --- Dashboard: value (recovered €) + plan usage + a detailed recovery list ---
-app.get("/dashboard", (req, res) => {
-  const s = stats();
+app.get("/dashboard", requireAuth, (req, res) => {
+  const aid = req.account.id;
+  const s = stats(aid);
   const cur = "EUR";
-  const plan = getPlan();
-  const used = usageThisMonth();
+  const plan = getPlan(aid);
+  const used = usageThisMonth(aid);
+  const stripeConnected = req.account.stripe?.connected;
   const limitTxt = plan.limit === Infinity ? "∞" : String(plan.limit);
   const pct = plan.limit === Infinity ? 0 : Math.min(100, Math.round((used / plan.limit) * 100));
   const barColor = pct >= 90 ? "#dc2626" : pct >= 70 ? "#d97706" : "#16a34a";
@@ -205,7 +306,7 @@ app.get("/dashboard", (req, res) => {
   const badge = (st) => st === "recovered"
     ? `<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:999px;font-size:12px">gerettet</span>`
     : `<span style="background:#fef9c3;color:#854d0e;padding:2px 8px;border-radius:999px;font-size:12px">offen</span>`;
-  const rows = listRecoveries(50).map((r) => `<tr style="border-top:1px solid #f0f0f0">
+  const rows = listRecoveries(aid, 50).map((r) => `<tr style="border-top:1px solid #f0f0f0">
       <td style="padding:10px 8px">${esc(r.customerEmail || "–")}</td>
       <td style="padding:10px 8px;text-align:right;white-space:nowrap">${money(r.amountDue, r.currency || cur)}</td>
       <td style="padding:10px 8px;text-align:center">${r.attempts || 0}</td>
@@ -217,7 +318,11 @@ app.get("/dashboard", (req, res) => {
   <title>PayRescue</title>
   <body style="font-family:system-ui;max-width:760px;margin:60px auto;color:#111;padding:0 16px">
     <h1 style="margin-bottom:2px">PayRescue</h1>
-    <p style="color:#555;margin-top:0">Wiederhergestellte Einnahmen, automatisch. · <a href="/settings" style="color:#2563eb;text-decoration:none">Einstellungen</a></p>
+    <p style="color:#555;margin-top:0">Wiederhergestellte Einnahmen, automatisch. · <a href="/settings" style="color:#2563eb;text-decoration:none">Einstellungen</a> · <span style="color:#888">${esc(req.account.email)}</span> · <a href="/logout" style="color:#888;text-decoration:none">Abmelden</a></p>
+    ${stripeConnected ? "" : `<div style="margin-top:20px;padding:16px 18px;border:1px solid #fde68a;background:#fffbeb;border-radius:12px">
+      <b style="color:#92400e">Stripe verbinden – kommt in Kürze</b>
+      <p style="color:#92400e;margin:6px 0 0;font-size:14px">Dein Konto ist angelegt. Sobald die Stripe-Anbindung (1-Klick) freigeschaltet ist, beginnt PayRescue automatisch, deine fehlgeschlagenen Zahlungen zu retten. Du wirst per E-Mail benachrichtigt.</p>
+    </div>`}
     <div style="display:flex;gap:16px;margin-top:24px;flex-wrap:wrap">
       <div style="flex:1;min-width:200px;padding:20px;border:1px solid #eee;border-radius:12px">
         <div style="font-size:13px;color:#888">Gerettet</div>
@@ -259,26 +364,19 @@ app.get("/dashboard", (req, res) => {
 });
 
 // --- Merchant settings: choose the dunning-mail sender identity ---
-// Optional light guard: set ADMIN_TOKEN to require ?token=... on this page.
-function settingsAllowed(req) {
-  const need = process.env.ADMIN_TOKEN;
-  return !need || req.query.token === need || req.body?.token === need;
-}
-
 function esc(s = "") {
   return String(s).replace(/[&<>"]/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
 
-app.get("/settings", async (req, res) => {
-  if (!settingsAllowed(req)) return res.status(401).send("Nicht autorisiert.");
-  const s = getSettings();
+app.get("/settings", requireAuth, async (req, res) => {
+  const aid = req.account.id;
+  const s = getSettings(aid);
   const m = await merchantInfo();
   const stripeName = m.name || "(in Stripe kein Firmenname hinterlegt)";
-  const tokenField = process.env.ADMIN_TOKEN
-    ? `<input type="hidden" name="token" value="${esc(req.query.token || "")}">` : "";
+  const tokenField = "";
   const sel = (v) => (s.nameMode === v ? "checked" : "");
-  const plan = getPlan();
+  const plan = getPlan(aid);
   const customAllowed = plan.key !== "starter";
 
   // Plan picker cards.
@@ -361,8 +459,8 @@ app.get("/settings", async (req, res) => {
   </body>`);
 });
 
-app.post("/settings", express.urlencoded({ extended: true }), (req, res) => {
-  if (!settingsAllowed(req)) return res.status(401).send("Nicht autorisiert.");
+app.post("/settings", requireAuth, express.urlencoded({ extended: true }), (req, res) => {
+  const aid = req.account.id;
   const planKey = PLANS[req.body.plan] ? req.body.plan : "starter";
   // Collect per-step template overrides from tpl_<i>_<key> fields.
   const templates = [];
@@ -374,7 +472,7 @@ app.post("/settings", express.urlencoded({ extended: true }), (req, res) => {
       outro: (req.body[`tpl_${i}_outro`] || "").trim(),
     });
   }
-  saveSettings({
+  saveSettings(aid, {
     plan: planKey,
     nameMode: req.body.nameMode === "custom" ? "custom" : "stripe",
     customName: (req.body.customName || "").trim(),
@@ -382,8 +480,7 @@ app.post("/settings", express.urlencoded({ extended: true }), (req, res) => {
     notifyEmail: (req.body.notifyEmail || "").trim(),
     templates,
   });
-  const token = process.env.ADMIN_TOKEN ? `?token=${encodeURIComponent(req.body.token || "")}` : "";
-  res.redirect(`/settings${token}`);
+  res.redirect("/settings");
 });
 
 app.get("/health", (_, res) => res.json({ ok: true }));

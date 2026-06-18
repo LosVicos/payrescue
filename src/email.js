@@ -206,4 +206,41 @@ export async function notifyMerchant({ to, kind, amount, currency, customerEmail
   return { dryRun: false, subject };
 }
 
+// --- Magic-link login email ----------------------------------------------
+// Sends a one-click sign-in link to the merchant. No password involved.
+export async function sendLoginLink({ to, url }) {
+  const subject = "Dein Login-Link für PayRescue";
+  const text = `Hallo,
+
+klicke auf den folgenden Link, um dich bei PayRescue anzumelden:
+
+${url}
+
+Der Link ist 20 Minuten gültig und kann nur einmal verwendet werden. Wenn du diese Anmeldung nicht angefordert hast, ignoriere diese E-Mail einfach.
+
+Viele Grüße
+PayRescue`;
+  const html = `<!doctype html><html><body style="margin:0;padding:0;background:#f5f5f5">
+    <div style="max-width:520px;margin:0 auto;padding:32px 24px;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#111">
+      <p style="margin:0 0 16px">Hallo,</p>
+      <p style="margin:0 0 20px">klicke auf den Button, um dich bei <b>PayRescue</b> anzumelden:</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 20px">
+        <tr><td style="border-radius:8px;background:#111">
+          <a href="${esc(url)}" style="display:inline-block;padding:13px 24px;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;border-radius:8px">Jetzt anmelden</a>
+        </td></tr></table>
+      <p style="margin:0 0 20px;font-size:12px;color:#999">Falls der Button nicht funktioniert, kopiere diesen Link in deinen Browser:<br><a href="${esc(url)}" style="color:#2563eb;word-break:break-all">${esc(url)}</a></p>
+      <p style="margin:0;font-size:12px;color:#999">Der Link ist 20 Minuten gültig und einmalig verwendbar. Nicht angefordert? Dann ignoriere diese E-Mail.</p>
+    </div></body></html>`;
+
+  if (!resend) {
+    console.log(`[login:DRY-RUN] -> ${to} | ${url}`);
+    return { dryRun: true };
+  }
+  await resend.emails.send({
+    from: `PayRescue <${process.env.FROM_EMAIL}>`,
+    to, subject, html, text,
+  });
+  return { dryRun: false };
+}
+
 export { money };
