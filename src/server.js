@@ -823,6 +823,7 @@ app.get("/api/v1/metrics", (req, res) => {
     },
     records,
   });
+});
 // --- AVV als lesbare Seite (für die Annahme bei der Anmeldung) -------------
 app.get("/avv", (_, res) => {
   res.type("html").send(`<!doctype html><meta charset="utf-8">
@@ -850,7 +851,8 @@ app.get("/avv", (_, res) => {
     <p style="color:#888;font-size:13px;margin-top:28px">Stand: Version 1.0. Vollständige Fassung inkl. Anlagen auf Anfrage als Dokument.</p>
   </body>`);
 });
-});app.get("/health", (_, res) => res.json({ ok: true }));
+
+app.get("/health", (_, res) => res.json({ ok: true }));
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`PayRescue läuft auf :${port}`));
