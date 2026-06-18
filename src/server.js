@@ -19,7 +19,7 @@ import {
   getBilling, setBilling, findAccountByCustomer,
 } from "./db.js";
 import { sendDunning, notifyMerchant, money, templateDefaults, STEP_COUNT, sendLoginLink } from "./email.js";
-
+import { recordAvvAcceptance } from "./db.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
