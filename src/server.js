@@ -491,7 +491,7 @@ app.get("/billing/checkout", requireAuth, async (req, res) => {
       client_reference_id: aid,
       metadata: { accountId: aid, plan },
       subscription_data: {
-        trial_period_days: TRIAL_DAYS,
+        ...(Number.isFinite(TRIAL_DAYS) && TRIAL_DAYS >= 1 ? { trial_period_days: Math.floor(TRIAL_DAYS) } : {}),
         metadata: { accountId: aid, plan },
       },
       allow_promotion_codes: true,
