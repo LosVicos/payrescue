@@ -165,7 +165,14 @@ export function findAccountByCustomer(customerId) {
   const db = load();
   return Object.values(db.accounts).find((a) => a.billing && a.billing.customerId === customerId) || null;
 }
-
+// Reverse lookup: which account connected this Stripe (Connect) account?
+export function findAccountByConnectedAccount(connectedAccountId) {
+  if (!connectedAccountId) return null;
+  const db = load();
+  return Object.values(db.accounts).find(
+    (a) => a.stripe && a.stripe.connectedAccountId === connectedAccountId
+  ) || null;
+}
 // --- Magic-link login tokens (short-lived, single-use) --------------------
 export function createLoginToken(email, ttlMinutes = 20) {
   const db = load();
