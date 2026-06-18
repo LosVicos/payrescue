@@ -275,14 +275,18 @@ function isOwnBillingInvoice(inv) {
 
 // --- Stripe webhook (raw body required for signature verification) ---
 app.post("/webhook", express.raw({ type: "application/json" }), async (req, res) => {
-  let event;
-  try {
-    event = stripe.webhooks.constructEvent(
-      req.body, req.headers["stripe-signature"], process.env.STRIPE_WEBHOOK_SECRET
-    );
-  } catch (err) {
-    console.error("⚠️  signature check failed:", err.message);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
+ // Two webhook destinations sign with different secrets: our platform account
+  // (STRIPE_WEBHOOK_SECRET) and the Connect "connected accounts" destination
+  // (PR_WEBHOOK_SECRET_CONNECT). Try each secret until one verifies.
+  let event = null;
+  const sig = req.headers["stripe-signature"];
+  const webhookSecrets = [process.env.STRIPE_WEBHOOK_SECRET, process.env.PR_WEBHOOK_SECRET_CONNECT].filter(Boolean);
+  for (const secret of webhookSecrets) {
+    try { event = stripe.webhooks.constructEvent(req.body, sig, secret); break; } catch (e) {}
+  }
+  if (!event) {
+    console.error("⚠️  signature check failed: no matching webhook secret");
+    return res.status(400).send("Webhook Error: signature verification failed");
   }
 
   try {
