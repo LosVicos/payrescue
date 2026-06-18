@@ -18,12 +18,20 @@ import {
   ownerId, getOrCreateAccount, createLoginToken, consumeLoginToken,
   createSession, getSessionAccount, destroySession,
   getBilling, setBilling, findAccountByCustomer, setStripeConnected,
+  findAccountByConnectedAccount,
 } from "./db.js";
 import { sendDunning, notifyMerchant, money, templateDefaults, STEP_COUNT, sendLoginLink } from "./email.js";
 import { recordAvvAcceptance } from "./db.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+// Stripe client used for Connect (OAuth exchange + connected-account calls).
+// For sandbox testing set PR_CONNECT_SECRET to a TEST key (sk_test_...): Connect
+// then runs in test mode while the live key keeps handling our own billing.
+// In production leave it unset — Connect falls back to the main (live) key.
+const connectStripe = process.env.PR_CONNECT_SECRET
+  ? new Stripe(process.env.PR_CONNECT_SECRET)
+  : stripe;
 const app = express();
 
 // --- PayRescue's own subscription billing (Stripe Checkout/Portal) --------
@@ -243,12 +251,12 @@ async function slack(text) {
 
 // Build a self-serve recovery link. Stripe's Billing Customer Portal lets the
 // customer update their card with zero work from us.
-async function recoveryUrl(customerId) {
+async function recoveryUrl(customerId, opts = {}) {
   try {
-    const session = await stripe.billingPortal.sessions.create({
+    const session = await connectStripe.billingPortal.sessions.create({
       customer: customerId,
       return_url: process.env.APP_BASE_URL || "https://example.com",
-    });
+    }, opts);
     return session.url;
   } catch {
     return `${process.env.APP_BASE_URL || ""}/recover`; // fallback page
@@ -278,26 +286,40 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
   }
 
   try {
-    // PayRescue's own subscription invoices are handled by the checkout/
-    // subscription branches below — never as merchant dunning.
-    if (event.type.startsWith("invoice.") && isOwnBillingInvoice(event.data.object)) {
+    // Route the event to the right PayRescue account. Events from a connected
+    // merchant account carry event.account; our own platform billing events
+    // do not and map to the owner. For connected accounts, Stripe API calls
+    // (e.g. the recovery portal link) must run on that account via stripeAccount.
+    const connectedAccount = event.account || null;
+    let targetId = ownerId;
+    let stripeOpts = {};
+    if (connectedAccount) {
+      const a = findAccountByConnectedAccount(connectedAccount);
+      if (!a) return res.json({ received: true, note: "unknown_connected_account" });
+      targetId = a.id;
+      stripeOpts = { stripeAccount: connectedAccount };
+    }
+
+    // Our own subscription invoices (platform, no event.account) are handled by
+    // the checkout/subscription branches below — never as merchant dunning.
+    if (!connectedAccount && event.type.startsWith("invoice.") && isOwnBillingInvoice(event.data.object)) {
       return res.json({ received: true, note: "own_billing_invoice" });
     }
 
     if (event.type === "invoice.payment_failed") {
       const inv = event.data.object;
-      const rec = upsertFailure(ownerId, {
+      const rec = upsertFailure(targetId, {
         invoiceId: inv.id,
         customerId: inv.customer,
         email: inv.customer_email,
         amount: inv.amount_due,
         currency: inv.currency,
       });
-      logEvent(ownerId, inv.id, "failed", `attempt ${rec.attempts}`);
+      logEvent(targetId, inv.id, "failed", `attempt ${rec.attempts}`);
 
-      const url = await recoveryUrl(inv.customer);
+      const url = await recoveryUrl(inv.customer, stripeOpts);
       const merchant = await merchantInfo();
-      const settings = getSettings(ownerId);
+      const settings = getSettings(targetId);
       // The merchant chooses the sender identity on /settings:
       //   "stripe" -> live brand name from Stripe (per-invoice, supports Connect)
       //   "custom" -> the name they typed in themselves
@@ -309,11 +331,11 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
       // Plan enforcement: a "rescue" = one at-risk invoice we dun this month.
       // Retries on an already-counted invoice always pass; brand-new invoices
       // are blocked once the monthly quota is hit, with a one-time heads-up.
-      const plan = getPlan(ownerId);
-      const counted = invoiceDunnedThisMonth(ownerId, inv.id);
-      const used = usageThisMonth(ownerId);
+      const plan = getPlan(targetId);
+      const counted = invoiceDunnedThisMonth(targetId, inv.id);
+      const used = usageThisMonth(targetId);
       if (!counted && used >= plan.limit) {
-        logEvent(ownerId, inv.id, "limit_reached", `${plan.name}: ${used}/${plan.limit}`);
+        logEvent(targetId, inv.id, "limit_reached", `${plan.name}: ${used}/${plan.limit}`);
         await slack(`:no_entry: Monatslimit erreicht (${plan.name}: ${plan.limit} Rettungen). `
           + `Neue fehlgeschlagene Zahlung ${money(inv.amount_due, inv.currency)} (${inv.customer_email}) NICHT angemahnt. Upgrade nötig.`);
         await notifyMerchant({
@@ -336,7 +358,7 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
         replyTo: settings.replyTo || merchant.supportEmail,
         templates,
       });
-      logEvent(ownerId, inv.id, "email_sent", sent.subject);
+      logEvent(targetId, inv.id, "email_sent", sent.subject);
 
       await slack(`:money_with_wings: Zahlung fehlgeschlagen – ${money(inv.amount_due, inv.currency)} `
         + `(${inv.customer_email}). Dunning-Mail #${rec.attempts} raus.`);
@@ -353,10 +375,10 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
 
     if (event.type === "invoice.payment_succeeded" || event.type === "invoice.paid") {
       const inv = event.data.object;
-      markRecovered(ownerId, inv.id);
-      logEvent(ownerId, inv.id, "recovered", money(inv.amount_due, inv.currency));
+      markRecovered(targetId, inv.id);
+      logEvent(targetId, inv.id, "recovered", money(inv.amount_due, inv.currency));
       await slack(`:white_check_mark: Zahlung gerettet – ${money(inv.amount_due, inv.currency)} (${inv.customer_email}).`);
-      const settings = getSettings(ownerId);
+      const settings = getSettings(targetId);
       await notifyMerchant({
         to: settings.notifyEmail,
         kind: "recovered",
@@ -587,7 +609,7 @@ app.get("/connect/callback", requireAuth, async (req, res) => {
        <p class="muted" style="margin-top:8px">Bitte starte die Verbindung vom Dashboard aus erneut.</p>`));
   }
   try {
-    const resp = await stripe.oauth.token({ grant_type: "authorization_code", code: req.query.code });
+    const resp = await connectStripe.oauth.token({ grant_type: "authorization_code", code: req.query.code });
     setStripeConnected(req.account.id, resp.stripe_user_id);
     logEvent(req.account.id, resp.stripe_user_id, "stripe_connected", "");
     res.redirect("/dashboard?stripe=ok");
