@@ -18,7 +18,7 @@ import {
   ownerId, getOrCreateAccount, createLoginToken, consumeLoginToken,
   createSession, getSessionAccount, destroySession,
   getBilling, setBilling, findAccountByCustomer, setStripeConnected,
-  findAccountByConnectedAccount,
+  findAccountByConnectedAccount, setStripeDisconnected,
 } from "./db.js";
 import { sendDunning, notifyMerchant, money, templateDefaults, STEP_COUNT, sendLoginLink } from "./email.js";
 import { recordAvvAcceptance } from "./db.js";
@@ -622,7 +622,18 @@ app.get("/connect/callback", requireAuth, async (req, res) => {
     res.redirect("/dashboard?stripe=fehler");
   }
 });
-
+// Disconnect: revoke our access at Stripe and clear the stored link.
+app.get("/connect/disconnect", requireAuth, async (req, res) => {
+  const acctId = req.account.stripe?.connectedAccountId;
+  try {
+    if (acctId && CONNECT_CLIENT_ID) {
+      await connectStripe.oauth.deauthorize({ client_id: CONNECT_CLIENT_ID, stripe_user_id: acctId });
+    }
+  } catch (e) { console.error("deauthorize error:", e.message); }
+  setStripeDisconnected(req.account.id);
+  logEvent(req.account.id, acctId || "", "stripe_disconnected", "");
+  res.redirect("/dashboard?stripe=getrennt");
+});
 // --- PayRescue subscription: Checkout + Customer Portal --------------------
 
 // Small standalone notice page (used when checkout isn't configured yet).
@@ -763,8 +774,10 @@ app.get("/dashboard", requireAuth, (req, res) => {
     ${req.query.stripe === "ok" ? `<div class="notice ok fade" style="margin-top:16px">Stripe erfolgreich verbunden – PayRescue überwacht deine Zahlungen jetzt automatisch.</div>` : ""}
     ${req.query.stripe === "abbruch" ? `<div class="notice warn fade" style="margin-top:16px">Verbindung abgebrochen. Du kannst es jederzeit erneut versuchen.</div>` : ""}
     ${req.query.stripe === "fehler" ? `<div class="notice err fade" style="margin-top:16px">Verbindung fehlgeschlagen. Bitte versuche es erneut.</div>` : ""}
-    ${stripeConnected ? `<div class="notice ok fade d1" style="margin-top:16px">
-      <b>Stripe verbunden.</b> Fehlgeschlagene Zahlungen werden automatisch erkannt und angemahnt.
+   ${req.query.stripe === "getrennt" ? `<div class="notice warn fade" style="margin-top:16px">Stripe-Verbindung getrennt. Du kannst dein Konto jederzeit neu verbinden.</div>` : ""}
+    ${stripeConnected ? `<div class="notice ok fade d1" style="margin-top:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+      <span><b>Stripe verbunden.</b> Fehlgeschlagene Zahlungen werden automatisch erkannt und angemahnt.</span>
+      ${req.account.stripe?.connectedAccountId ? `<a href="/connect/disconnect" onclick="return confirm('Stripe-Verbindung wirklich trennen? PayRescue erkennt danach keine fehlgeschlagenen Zahlungen mehr.')" class="muted" style="font-size:13px;text-decoration:underline;white-space:nowrap">Trennen</a>` : ""}
     </div>` : `<div class="card lift fade d1" style="margin-top:16px;border-color:#2c3a52">
       <h2 style="font-size:18px">${icon("card")} Stripe verbinden</h2>
       <p class="muted" style="margin:8px 0 14px">Verbinde dein Stripe-Konto, damit PayRescue fehlgeschlagene Zahlungen erkennt und automatisch Erinnerungen an deine Kunden schickt. Du wirst sicher zu Stripe weitergeleitet – du gibst hier keine Schlüssel oder Passwörter ein.</p>
