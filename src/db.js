@@ -138,6 +138,12 @@ export function setStripeConnected(accountId, connectedAccountId) {
     a.stripe = { connected: true, connectedAccountId: connectedAccountId || null };
     save(db);
   }
+  // Disconnect: clear the stored Connect link for this account.
+export function setStripeDisconnected(accountId) {
+  const db = load();
+  const a = db.accounts[accountId];
+  if (a) { a.stripe = { connected: false, connectedAccountId: null }; save(db); }
+}
 }
 
 // --- PayRescue's own subscription billing (Stripe Checkout/Portal) --------
