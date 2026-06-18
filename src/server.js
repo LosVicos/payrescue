@@ -275,7 +275,7 @@ function isOwnBillingInvoice(inv) {
 
 // --- Stripe webhook (raw body required for signature verification) ---
 app.post("/webhook", express.raw({ type: "application/json" }), async (req, res) => {
- // Two webhook destinations sign with different secrets: our platform account
+  // Two webhook destinations sign with different secrets: our platform account
   // (STRIPE_WEBHOOK_SECRET) and the Connect "connected accounts" destination
   // (PR_WEBHOOK_SECRET_CONNECT). Try each secret until one verifies.
   let event = null;
@@ -622,6 +622,7 @@ app.get("/connect/callback", requireAuth, async (req, res) => {
     res.redirect("/dashboard?stripe=fehler");
   }
 });
+
 // Disconnect: revoke our access at Stripe and clear the stored link.
 app.get("/connect/disconnect", requireAuth, async (req, res) => {
   const acctId = req.account.stripe?.connectedAccountId;
@@ -634,6 +635,7 @@ app.get("/connect/disconnect", requireAuth, async (req, res) => {
   logEvent(req.account.id, acctId || "", "stripe_disconnected", "");
   res.redirect("/dashboard?stripe=getrennt");
 });
+
 // --- PayRescue subscription: Checkout + Customer Portal --------------------
 
 // Small standalone notice page (used when checkout isn't configured yet).
@@ -774,7 +776,7 @@ app.get("/dashboard", requireAuth, (req, res) => {
     ${req.query.stripe === "ok" ? `<div class="notice ok fade" style="margin-top:16px">Stripe erfolgreich verbunden – PayRescue überwacht deine Zahlungen jetzt automatisch.</div>` : ""}
     ${req.query.stripe === "abbruch" ? `<div class="notice warn fade" style="margin-top:16px">Verbindung abgebrochen. Du kannst es jederzeit erneut versuchen.</div>` : ""}
     ${req.query.stripe === "fehler" ? `<div class="notice err fade" style="margin-top:16px">Verbindung fehlgeschlagen. Bitte versuche es erneut.</div>` : ""}
-   ${req.query.stripe === "getrennt" ? `<div class="notice warn fade" style="margin-top:16px">Stripe-Verbindung getrennt. Du kannst dein Konto jederzeit neu verbinden.</div>` : ""}
+    ${req.query.stripe === "getrennt" ? `<div class="notice warn fade" style="margin-top:16px">Stripe-Verbindung getrennt. Du kannst dein Konto jederzeit neu verbinden.</div>` : ""}
     ${stripeConnected ? `<div class="notice ok fade d1" style="margin-top:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
       <span><b>Stripe verbunden.</b> Fehlgeschlagene Zahlungen werden automatisch erkannt und angemahnt.</span>
       ${req.account.stripe?.connectedAccountId ? `<a href="/connect/disconnect" onclick="return confirm('Stripe-Verbindung wirklich trennen? PayRescue erkennt danach keine fehlgeschlagenen Zahlungen mehr.')" class="muted" style="font-size:13px;text-decoration:underline;white-space:nowrap">Trennen</a>` : ""}
