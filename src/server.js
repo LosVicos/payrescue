@@ -823,6 +823,33 @@ app.get("/api/v1/metrics", (req, res) => {
     },
     records,
   });
+// --- AVV als lesbare Seite (für die Annahme bei der Anmeldung) -------------
+app.get("/avv", (_, res) => {
+  res.type("html").send(`<!doctype html><meta charset="utf-8">
+  <title>PayRescue – Auftragsverarbeitungsvertrag</title>
+  <body style="font-family:system-ui;max-width:760px;margin:48px auto;color:#111;line-height:1.6;padding:0 18px">
+    <p style="margin:0 0 18px"><a href="/login" style="color:#2563eb;text-decoration:none">← Zurück</a></p>
+    <h1>Auftragsverarbeitungsvertrag (AVV)</h1>
+    <p style="color:#555">Version 1.0 · gemäß Art. 28 DSGVO. Mit dem Setzen des Häkchens bei der Anmeldung schließt du als Verantwortlicher diesen AVV mit dem Betreiber von PayRescue als Auftragsverarbeiter in elektronischer Form (Art. 28 Abs. 9 DSGVO).</p>
+    <h2>1. Gegenstand &amp; Zweck</h2>
+    <p>PayRescue verarbeitet personenbezogene Daten ausschließlich in deinem Auftrag zur Wiederherstellung fehlgeschlagener Abo-Zahlungen: Erkennung fehlgeschlagener Zahlungen, Versand von Zahlungserinnerungen und Auswertung zurückgewonnener Umsätze.</p>
+    <h2>2. Datenarten &amp; Betroffene</h2>
+    <p>Betroffen sind deine Endkunden mit fehlgeschlagener Zahlung. Verarbeitet werden: E-Mail-Adresse, Rechnungs-/Zahlungs-IDs, offene Beträge, Währung, Zahlungsstatus, Anzahl Versuche, Zeitstempel. Keine besonderen Kategorien nach Art. 9 DSGVO.</p>
+    <h2>3. Weisungsbindung</h2>
+    <p>Die Verarbeitung erfolgt nur auf deine dokumentierte Weisung; deine Konfiguration des Dienstes gilt als Weisung.</p>
+    <h2>4. Technische &amp; organisatorische Maßnahmen (Art. 32 DSGVO)</h2>
+    <p>Verschlüsselte Übertragung (TLS), Mandantentrennung auf Anwendungsebene, passwortlose Authentifizierung, tokengeschützter API-Zugriff, Verarbeitung in zertifizierten Rechenzentren (SOC 2), regelmäßige Backups.</p>
+    <h2>5. Sub-Auftragsverarbeiter</h2>
+    <p>Stripe Payments Europe, Ltd. (Irland) – Zahlungsabwicklung; Resend (USA, SCC) – E-Mail-Versand; Railway (USA, SCC) – Hosting. Du stimmst diesen zu. Änderungen werden vorab mitgeteilt; Widerspruch binnen 30 Tagen möglich.</p>
+    <h2>6. Drittland</h2>
+    <p>Übermittlungen in die USA erfolgen auf Basis der EU-Standardvertragsklauseln bzw. des EU-US Data Privacy Framework.</p>
+    <h2>7. Betroffenenrechte &amp; Meldungen</h2>
+    <p>Der Auftragnehmer unterstützt dich bei Betroffenenanfragen und meldet Datenschutzverletzungen unverzüglich (i. d. R. binnen 48 h).</p>
+    <h2>8. Löschung</h2>
+    <p>Nach Vertragsende werden die Daten gelöscht oder zurückgegeben, soweit keine gesetzliche Aufbewahrungspflicht besteht.</p>
+    <p style="color:#888;font-size:13px;margin-top:28px">Stand: Version 1.0. Vollständige Fassung inkl. Anlagen auf Anfrage als Dokument.</p>
+  </body>`);
+});
 });app.get("/health", (_, res) => res.json({ ok: true }));
 
 const port = process.env.PORT || 3000;
