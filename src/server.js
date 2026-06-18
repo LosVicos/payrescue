@@ -417,6 +417,17 @@ app.post("/login", express.urlencoded({ extended: true }), async (req, res) => {
   if (!email || !email.includes("@")) {
     return res.status(400).send(loginPage({ error: "Bitte eine gültige E-Mail-Adresse eingeben." }));
   }
+  if (!req.body.avv) {
+    return res.status(400).send(loginPage({ error: "Bitte den Auftragsverarbeitungsvertrag akzeptieren, um fortzufahren." }));
+  }
+  try {
+    recordAvvAcceptance({
+      email,
+      version: "1.0",
+      ip: (req.headers["x-forwarded-for"] || "").split(",")[0].trim() || req.socket?.remoteAddress || "",
+      userAgent: req.headers["user-agent"] || "",
+    });
+  } catch (e) { console.error("avv log error:", e.message); }
   const token = createLoginToken(email);
   const base = process.env.APP_BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
   const url = `${base}/login/verify?token=${encodeURIComponent(token)}`;
