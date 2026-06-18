@@ -11,12 +11,13 @@ import Stripe from "stripe";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import crypto from "crypto";
 import {
   upsertFailure, markRecovered, logEvent, stats, getSettings, saveSettings,
   getPlan, usageThisMonth, invoiceDunnedThisMonth, listRecoveries, PLANS,
   ownerId, getOrCreateAccount, createLoginToken, consumeLoginToken,
   createSession, getSessionAccount, destroySession,
-  getBilling, setBilling, findAccountByCustomer,
+  getBilling, setBilling, findAccountByCustomer, setStripeConnected,
 } from "./db.js";
 import { sendDunning, notifyMerchant, money, templateDefaults, STEP_COUNT, sendLoginLink } from "./email.js";
 import { recordAvvAcceptance } from "./db.js";
@@ -43,6 +44,13 @@ const APP_BASE = () =>
   process.env.APP_BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
 // 5-day free trial, matching the landing-page promise.
 const TRIAL_DAYS = Number(process.env.PR_TRIAL_DAYS || 5);
+
+// --- Stripe Connect (OAuth) ----------------------------------------------
+// Lets each B2B merchant link their OWN Stripe account so PayRescue can read
+// their failed payments and dun their customers. One platform-wide, public
+// client id (ca_...), set once as an env var. Secret key is the existing one.
+const CONNECT_CLIENT_ID = process.env.PR_CONNECT_CLIENT_ID || "";
+const CONNECT_STATE = "pr_cstate"; // short-lived CSRF cookie for the round-trip
 
 // --- Shared dark theme, matching the public landing page ------------------
 const THEME = `
@@ -544,6 +552,51 @@ app.get("/logout", (req, res) => {
   res.redirect("/login");
 });
 
+// --- Stripe Connect: B2B merchant links their own Stripe via OAuth --------
+// Step 1: send the merchant to Stripe to authorize. We never see their keys —
+// Stripe hands us back a one-time code which we exchange for their account id.
+app.get("/connect/stripe", requireAuth, (req, res) => {
+  if (!CONNECT_CLIENT_ID) {
+    return res.status(503).send(noticePage("PayRescue – Stripe verbinden",
+      `<h1>Anbindung wird eingerichtet</h1>
+       <p class="muted" style="margin-top:8px">Die Stripe-Plattformanbindung ist noch nicht konfiguriert. Bitte in Kürze erneut versuchen.</p>`));
+  }
+  const state = crypto.randomBytes(16).toString("hex");
+  const secure = isHttps() ? "; Secure" : "";
+  res.setHeader("Set-Cookie", `${CONNECT_STATE}=${state}; HttpOnly; Path=/; Max-Age=600; SameSite=Lax${secure}`);
+  const params = new URLSearchParams({
+    response_type: "code",
+    client_id: CONNECT_CLIENT_ID,
+    scope: "read_write",
+    redirect_uri: `${APP_BASE()}/connect/callback`,
+    state,
+    "stripe_user[email]": req.account.email,
+  });
+  res.redirect(`https://connect.stripe.com/oauth/authorize?${params.toString()}`);
+});
+
+// Step 2: Stripe redirects back here with ?code & ?state. Verify state (CSRF),
+// exchange the code for the connected account id, store it on the account.
+app.get("/connect/callback", requireAuth, async (req, res) => {
+  const expected = parseCookies(req)[CONNECT_STATE];
+  res.setHeader("Set-Cookie", `${CONNECT_STATE}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax`);
+  if (req.query.error) return res.redirect("/dashboard?stripe=abbruch");
+  if (!req.query.code || !req.query.state || !expected || req.query.state !== expected) {
+    return res.status(400).send(noticePage("PayRescue – Stripe verbinden",
+      `<h1>Sicherheitsprüfung fehlgeschlagen</h1>
+       <p class="muted" style="margin-top:8px">Bitte starte die Verbindung vom Dashboard aus erneut.</p>`));
+  }
+  try {
+    const resp = await stripe.oauth.token({ grant_type: "authorization_code", code: req.query.code });
+    setStripeConnected(req.account.id, resp.stripe_user_id);
+    logEvent(req.account.id, resp.stripe_user_id, "stripe_connected", "");
+    res.redirect("/dashboard?stripe=ok");
+  } catch (e) {
+    console.error("connect oauth error:", e.message);
+    res.redirect("/dashboard?stripe=fehler");
+  }
+});
+
 // --- PayRescue subscription: Checkout + Customer Portal --------------------
 
 // Small standalone notice page (used when checkout isn't configured yet).
@@ -681,9 +734,15 @@ app.get("/dashboard", requireAuth, (req, res) => {
       <h1>Willkommen zurück</h1>
       <p class="muted" style="margin-top:6px">Wiederhergestellte Einnahmen, automatisch – ohne dass du etwas tun musst.</p>
     </div>
-    ${stripeConnected ? "" : `<div class="notice warn fade d1" style="margin-top:16px">
-      <b>Stripe verbinden – kommt in Kürze</b><br>
-      Dein Konto ist angelegt. Sobald die Stripe-Anbindung (1-Klick) freigeschaltet ist, beginnt PayRescue automatisch, deine fehlgeschlagenen Zahlungen zu retten. Du wirst per E-Mail benachrichtigt.
+    ${req.query.stripe === "ok" ? `<div class="notice ok fade" style="margin-top:16px">Stripe erfolgreich verbunden – PayRescue überwacht deine Zahlungen jetzt automatisch.</div>` : ""}
+    ${req.query.stripe === "abbruch" ? `<div class="notice warn fade" style="margin-top:16px">Verbindung abgebrochen. Du kannst es jederzeit erneut versuchen.</div>` : ""}
+    ${req.query.stripe === "fehler" ? `<div class="notice err fade" style="margin-top:16px">Verbindung fehlgeschlagen. Bitte versuche es erneut.</div>` : ""}
+    ${stripeConnected ? `<div class="notice ok fade d1" style="margin-top:16px">
+      <b>Stripe verbunden.</b> Fehlgeschlagene Zahlungen werden automatisch erkannt und angemahnt.
+    </div>` : `<div class="card lift fade d1" style="margin-top:16px;border-color:#2c3a52">
+      <h2 style="font-size:18px">${icon("card")} Stripe verbinden</h2>
+      <p class="muted" style="margin:8px 0 14px">Verbinde dein Stripe-Konto, damit PayRescue fehlgeschlagene Zahlungen erkennt und automatisch Erinnerungen an deine Kunden schickt. Du wirst sicher zu Stripe weitergeleitet – du gibst hier keine Schlüssel oder Passwörter ein.</p>
+      <a href="/connect/stripe" class="btn">${icon("shield")} Mit Stripe verbinden</a>
     </div>`}
     <div style="display:flex;gap:16px;margin-top:16px;flex-wrap:wrap">
       <div class="card stat lift fade d1" style="flex:1;min-width:220px">
