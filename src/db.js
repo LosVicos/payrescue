@@ -40,6 +40,9 @@ function blankAccount(id, email) {
     recoveries: {},
     events: [],
     stripe: { connected: false, connectedAccountId: null },
+    // PayRescue's OWN subscription (the merchant paying us). Distinct from the
+    // merchant's connected Stripe account above.
+    billing: { customerId: null, subscriptionId: null, status: null },
   };
 }
 
@@ -119,6 +122,32 @@ export function setStripeConnected(accountId, connectedAccountId) {
     a.stripe = { connected: true, connectedAccountId: connectedAccountId || null };
     save(db);
   }
+}
+
+// --- PayRescue's own subscription billing (Stripe Checkout/Portal) --------
+// We record which Stripe customer + subscription pays for THIS account, so
+// webhook events from our own billing can be mapped back to the account and
+// kept apart from the merchant's dunning traffic.
+export function getBilling(accountId) {
+  const db = load();
+  const a = db.accounts[accountId];
+  return (a && a.billing) || { customerId: null, subscriptionId: null, status: null };
+}
+
+export function setBilling(accountId, patch) {
+  const db = load();
+  const a = db.accounts[accountId];
+  if (!a) return null;
+  a.billing = { customerId: null, subscriptionId: null, status: null, ...(a.billing || {}), ...patch };
+  save(db);
+  return a.billing;
+}
+
+// Reverse lookup: which account belongs to this Stripe billing customer?
+export function findAccountByCustomer(customerId) {
+  if (!customerId) return null;
+  const db = load();
+  return Object.values(db.accounts).find((a) => a.billing && a.billing.customerId === customerId) || null;
 }
 
 // --- Magic-link login tokens (short-lived, single-use) --------------------

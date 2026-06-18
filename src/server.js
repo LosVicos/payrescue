@@ -16,6 +16,7 @@ import {
   getPlan, usageThisMonth, invoiceDunnedThisMonth, listRecoveries, PLANS,
   ownerId, getOrCreateAccount, createLoginToken, consumeLoginToken,
   createSession, getSessionAccount, destroySession,
+  getBilling, setBilling, findAccountByCustomer,
 } from "./db.js";
 import { sendDunning, notifyMerchant, money, templateDefaults, STEP_COUNT, sendLoginLink } from "./email.js";
 
@@ -23,6 +24,25 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const app = express();
+
+// --- PayRescue's own subscription billing (Stripe Checkout/Portal) --------
+// Each plan maps to a recurring Stripe Price the merchant creates once in their
+// Stripe dashboard and pastes here as an env var. Until set, checkout shows a
+// friendly "coming soon" page instead of erroring.
+const PLAN_PRICE = {
+  starter: process.env.PR_PRICE_STARTER || "",
+  growth: process.env.PR_PRICE_GROWTH || "",
+  scale: process.env.PR_PRICE_SCALE || "",
+};
+// Reverse map (priceId -> planKey) for subscription webhook events.
+const PRICE_PLAN = Object.fromEntries(
+  Object.entries(PLAN_PRICE).filter(([, v]) => v).map(([k, v]) => [v, k])
+);
+const billingConfigured = (plan) => Boolean(PLAN_PRICE[plan]);
+const APP_BASE = () =>
+  process.env.APP_BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
+// 5-day free trial, matching the landing-page promise.
+const TRIAL_DAYS = Number(process.env.PR_TRIAL_DAYS || 5);
 
 // --- Shared dark theme, matching the public landing page ------------------
 const THEME = `
@@ -149,6 +169,16 @@ async function recoveryUrl(customerId) {
   }
 }
 
+// An invoice belongs to PayRescue's OWN subscription billing (not a merchant's
+// dunning traffic) if its customer is a known billing customer or one of its
+// line items uses one of our plan prices. Such invoices must never be dunned.
+function isOwnBillingInvoice(inv) {
+  if (!inv) return false;
+  if (findAccountByCustomer(inv.customer)) return true;
+  const lines = inv.lines?.data || [];
+  return lines.some((l) => PRICE_PLAN[l.price?.id]);
+}
+
 // --- Stripe webhook (raw body required for signature verification) ---
 app.post("/webhook", express.raw({ type: "application/json" }), async (req, res) => {
   let event;
@@ -162,6 +192,12 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
   }
 
   try {
+    // PayRescue's own subscription invoices are handled by the checkout/
+    // subscription branches below — never as merchant dunning.
+    if (event.type.startsWith("invoice.") && isOwnBillingInvoice(event.data.object)) {
+      return res.json({ received: true, note: "own_billing_invoice" });
+    }
+
     if (event.type === "invoice.payment_failed") {
       const inv = event.data.object;
       const rec = upsertFailure(ownerId, {
@@ -243,6 +279,51 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
         customerEmail: inv.customer_email,
       });
     }
+
+    // --- PayRescue's own subscription lifecycle -------------------------
+    // The merchant just subscribed (or restarted) via Checkout: bind the
+    // Stripe customer + subscription to their account and set the plan.
+    if (event.type === "checkout.session.completed") {
+      const s = event.data.object;
+      const accId = s.client_reference_id || s.metadata?.accountId;
+      const planKey = s.metadata?.plan;
+      if (accId) {
+        setBilling(accId, {
+          customerId: s.customer,
+          subscriptionId: s.subscription,
+          status: "active",
+        });
+        if (planKey && PLANS[planKey]) saveSettings(accId, { plan: planKey });
+        logEvent(accId, s.id, "subscribed", planKey || "");
+      }
+    }
+
+    // Plan changes (up/downgrade, trial->active) keep the account's plan in
+    // sync with the live subscription's price.
+    if (event.type === "customer.subscription.updated"
+      || event.type === "customer.subscription.created") {
+      const sub = event.data.object;
+      const a = findAccountByCustomer(sub.customer);
+      if (a) {
+        const priceId = sub.items?.data?.[0]?.price?.id;
+        const planKey = PRICE_PLAN[priceId];
+        setBilling(a.id, { subscriptionId: sub.id, status: sub.status });
+        if (planKey && (sub.status === "active" || sub.status === "trialing")) {
+          saveSettings(a.id, { plan: planKey });
+        }
+      }
+    }
+
+    // Subscription ended (cancellation took effect): downgrade to entry plan.
+    if (event.type === "customer.subscription.deleted") {
+      const sub = event.data.object;
+      const a = findAccountByCustomer(sub.customer);
+      if (a) {
+        setBilling(a.id, { status: "canceled" });
+        saveSettings(a.id, { plan: "starter" });
+        logEvent(a.id, sub.id, "subscription_canceled", "");
+      }
+    }
   } catch (e) {
     console.error("handler error:", e.message);
     // Return 200 anyway so Stripe doesn't retry-storm us on a transient bug.
@@ -253,6 +334,9 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
 
 // --- Auth: magic-link login + server-side sessions (httpOnly cookie) -------
 const COOKIE = "pr_session";
+// Short-lived hint that remembers which plan a logged-out visitor clicked, so
+// we can drop them straight into Checkout after they log in.
+const INTENT = "pr_intent";
 
 function parseCookies(req) {
   const out = {};
@@ -265,10 +349,17 @@ function parseCookies(req) {
   return out;
 }
 
+const isHttps = () => (process.env.APP_BASE_URL || "").startsWith("https");
+function sessionCookieStr(token) {
+  return `${COOKIE}=${encodeURIComponent(token)}; HttpOnly; Path=/; Max-Age=${30 * 86400}; SameSite=Lax${isHttps() ? "; Secure" : ""}`;
+}
+function intentCookieStr(plan) {
+  return `${INTENT}=${encodeURIComponent(plan)}; HttpOnly; Path=/; Max-Age=1800; SameSite=Lax${isHttps() ? "; Secure" : ""}`;
+}
+const clearIntentStr = () => `${INTENT}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax`;
+
 function setSessionCookie(res, token) {
-  const secure = (process.env.APP_BASE_URL || "").startsWith("https") ? "; Secure" : "";
-  res.setHeader("Set-Cookie",
-    `${COOKIE}=${encodeURIComponent(token)}; HttpOnly; Path=/; Max-Age=${30 * 86400}; SameSite=Lax${secure}`);
+  res.setHeader("Set-Cookie", sessionCookieStr(token));
 }
 function clearSessionCookie(res) {
   res.setHeader("Set-Cookie", `${COOKIE}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax`);
@@ -339,8 +430,16 @@ app.get("/login/verify", (req, res) => {
   }
   const acct = getOrCreateAccount(email);
   const session = createSession(acct.id);
-  setSessionCookie(res, session);
-  res.redirect("/dashboard");
+  // If they came in via a pricing button, continue to Checkout; else dashboard.
+  const intent = parseCookies(req)[INTENT];
+  const cookies = [sessionCookieStr(session)];
+  let dest = "/dashboard";
+  if (intent && PLANS[intent]) {
+    dest = `/billing/checkout?plan=${intent}`;
+    cookies.push(clearIntentStr());
+  }
+  res.setHeader("Set-Cookie", cookies);
+  res.redirect(dest);
 });
 
 app.get("/logout", (req, res) => {
@@ -348,6 +447,94 @@ app.get("/logout", (req, res) => {
   destroySession(token);
   clearSessionCookie(res);
   res.redirect("/login");
+});
+
+// --- PayRescue subscription: Checkout + Customer Portal --------------------
+
+// Small standalone notice page (used when checkout isn't configured yet).
+function noticePage(title, html) {
+  const body = `
+    <div style="padding:28px 0 28px;text-align:center">
+      <a href="/" class="logo" style="font-size:24px">Pay<span>Rescue</span></a>
+    </div>
+    <div class="card">${html}</div>
+    <p class="muted" style="font-size:13px;margin-top:22px;text-align:center"><a href="/dashboard">← Zum Dashboard</a></p>`;
+  return page(title, body, { narrow: true });
+}
+
+// Entry point from the public pricing buttons. Remembers the chosen plan and
+// sends logged-out visitors through login first, then on to Checkout.
+app.get("/billing/start", (req, res) => {
+  const plan = String(req.query.plan || "");
+  if (!PLANS[plan]) return res.redirect("/#start");
+  if (currentAccount(req)) return res.redirect(`/billing/checkout?plan=${plan}`);
+  res.setHeader("Set-Cookie", intentCookieStr(plan));
+  res.redirect("/login");
+});
+
+// Create a Stripe Checkout session for the chosen plan and redirect to it.
+app.get("/billing/checkout", requireAuth, async (req, res) => {
+  const plan = String(req.query.plan || "");
+  if (!PLANS[plan]) return res.redirect("/settings");
+  if (!billingConfigured(plan)) {
+    return res.status(503).send(noticePage("PayRescue – Abo",
+      `<h1>Abo bald verfügbar</h1>
+       <p class="muted" style="margin-top:8px">Der Checkout für den <b>${esc(PLANS[plan].name)}</b>-Plan wird gerade fertig eingerichtet
+       (Stripe-Preis noch nicht hinterlegt). Sobald die Preis-ID gesetzt ist, kannst du hier direkt buchen.</p>`));
+  }
+  try {
+    const aid = req.account.id;
+    const bill = getBilling(aid);
+    const params = {
+      mode: "subscription",
+      line_items: [{ price: PLAN_PRICE[plan], quantity: 1 }],
+      client_reference_id: aid,
+      metadata: { accountId: aid, plan },
+      subscription_data: {
+        trial_period_days: TRIAL_DAYS,
+        metadata: { accountId: aid, plan },
+      },
+      allow_promotion_codes: true,
+      success_url: `${APP_BASE()}/dashboard?abo=ok`,
+      cancel_url: `${APP_BASE()}/settings?abo=abbruch`,
+    };
+    // Reuse the existing billing customer if we already have one; otherwise let
+    // Checkout create one from the account email.
+    if (bill.customerId) params.customer = bill.customerId;
+    else params.customer_email = req.account.email;
+
+    const session = await stripe.checkout.sessions.create(params);
+    res.redirect(303, session.url);
+  } catch (e) {
+    console.error("checkout error:", e.message);
+    res.status(500).send(noticePage("PayRescue – Abo",
+      `<h1>Checkout fehlgeschlagen</h1>
+       <p class="muted" style="margin-top:8px">Der Checkout konnte nicht gestartet werden. Bitte versuche es später erneut.</p>`));
+  }
+});
+
+// Open the Stripe Customer Portal so the merchant can update payment details,
+// switch plans or cancel.
+app.get("/billing/portal", requireAuth, async (req, res) => {
+  const bill = getBilling(req.account.id);
+  if (!bill.customerId) {
+    return res.status(400).send(noticePage("PayRescue – Abo",
+      `<h1>Noch kein aktives Abo</h1>
+       <p class="muted" style="margin-top:8px">Du hast aktuell kein laufendes Abo zum Verwalten. Wähle in den
+       <a href="/settings">Einstellungen</a> einen Plan, um zu starten.</p>`));
+  }
+  try {
+    const portal = await stripe.billingPortal.sessions.create({
+      customer: bill.customerId,
+      return_url: `${APP_BASE()}/settings`,
+    });
+    res.redirect(303, portal.url);
+  } catch (e) {
+    console.error("portal error:", e.message);
+    res.status(500).send(noticePage("PayRescue – Abo",
+      `<h1>Portal nicht verfügbar</h1>
+       <p class="muted" style="margin-top:8px">Das Kundenportal konnte nicht geöffnet werden. Bitte versuche es später erneut.</p>`));
+  }
 });
 
 // --- Public landing page at the domain root ---
@@ -457,6 +644,32 @@ app.get("/settings", requireAuth, async (req, res) => {
   const plan = getPlan(aid);
   const customAllowed = plan.key !== "starter";
 
+  // --- PayRescue subscription status + Checkout/Portal buttons ----------
+  const bill = getBilling(aid);
+  const hasSub = Boolean(bill.customerId);
+  const statusLabel = {
+    active: "aktiv", trialing: "Testphase", past_due: "Zahlung überfällig",
+    unpaid: "unbezahlt", canceled: "gekündigt",
+  }[bill.status] || (hasSub ? (bill.status || "—") : "kein Abo");
+  const statusOk = bill.status === "active" || bill.status === "trialing";
+  const checkoutBtns = Object.values(PLANS).map((p) => {
+    const isCurrent = plan.key === p.key && hasSub;
+    const cls = p.key === "growth" ? "btn" : "btn ghost";
+    if (isCurrent) return `<a class="btn ghost" style="opacity:.5;pointer-events:none">Aktueller Plan: ${esc(p.name)}</a>`;
+    return `<a class="${cls}" href="/billing/checkout?plan=${p.key}">${esc(p.name)} buchen · ${p.price} €</a>`;
+  }).join(" ");
+  const billingCard = `<div class="card" style="margin-bottom:26px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <div style="font-size:15px"><b>Aktuelles Abo:</b> ${esc(plan.name)}
+          <span class="badge ${statusOk ? "ok" : "open"}" style="margin-left:6px">${esc(statusLabel)}</span></div>
+        ${hasSub ? `<a class="btn ghost" href="/billing/portal">Abo verwalten / kündigen</a>` : ""}
+      </div>
+      <p class="muted" style="font-size:13px;margin:12px 0 14px">${hasSub
+        ? "Plan wechseln, Zahlungsdaten ändern oder kündigen – alles über das sichere Stripe-Kundenportal."
+        : `Wähle einen Plan: ${TRIAL_DAYS} Tage kostenlos testen, danach monatlich, jederzeit kündbar.`}</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">${checkoutBtns}</div>
+    </div>`;
+
   // Plan picker cards.
   const planCards = Object.values(PLANS).map((p) => {
     const lim = p.limit === Infinity ? "Unbegrenzte Rettungen" : `Bis ${p.limit} Rettungen/Monat`;
@@ -493,11 +706,15 @@ app.get("/settings", requireAuth, async (req, res) => {
   const body = `${topnav(req.account, "/settings")}
     <div style="max-width:580px;padding:28px 0 60px">
     <h1>Einstellungen</h1>
-    <p class="muted">Plan, Absender-Identität und deine Mahn-Texte.</p>
-    <form method="post" action="/settings" style="margin-top:24px">
+    <p class="muted">Abo, Absender-Identität und deine Mahn-Texte.</p>
+
+    <h2 style="margin:24px 0 12px">Abo &amp; Zahlung</h2>
+    ${billingCard}
+
+    <form method="post" action="/settings" style="margin-top:8px">
       ${tokenField}
-      <h2 style="margin-top:8px">Dein Plan</h2>
-      <p class="muted" style="margin-bottom:14px">Bestimmt, wie viele Rettungen pro Monat möglich sind.</p>
+      <h2 style="margin-top:8px">Plan (manuell)</h2>
+      <p class="muted" style="margin-bottom:14px">Wird normalerweise durch dein Abo gesetzt. Manuelle Auswahl wirkt sofort – v.a. zum Testen.</p>
       ${planCards}
 
       <h2 style="margin:32px 0 4px">Absender deiner Zahlungs-E-Mails</h2>
